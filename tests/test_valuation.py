@@ -144,6 +144,8 @@ def test_resolve_round_all_combinations():
     assert round_consistency(2e6, 8e6, 0.25) is not None
     with pytest.raises(ValueError):
         resolve_round(2e6, None, None)
+    with pytest.raises(ValueError):
+        resolve_round(0.0, 0.0, None)
 
 
 # ---------------------------------------------------------------- múltiplos y caja

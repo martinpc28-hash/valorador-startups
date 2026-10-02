@@ -25,7 +25,10 @@ def test_schema(metrics):
     assert list(metrics.columns) == SCHEMA
 
 
-@pytest.mark.parametrize("name", ["industry_metrics.csv", "size_class_metrics.csv", "market_metrics.csv", "fx_rates.csv"])
+SEC_FILES = ["sec_form_d.csv.gz", "sec_form_d_funds.csv.gz", "sec_form_c.csv.gz", "sec_s1.csv.gz"]
+
+
+@pytest.mark.parametrize("name", ["industry_metrics.csv", "size_class_metrics.csv", "market_metrics.csv", "fx_rates.csv"] + SEC_FILES)
 def test_every_row_has_provenance(name):
     df = pd.read_csv(DATA / name)
     assert not df.empty
@@ -37,7 +40,7 @@ def test_every_row_has_provenance(name):
 
 def test_sources_registry_lists_every_source(metrics):
     registry = pd.read_csv(DATA / "sources.csv")
-    for f in ["industry_metrics.csv", "size_class_metrics.csv", "market_metrics.csv", "fx_rates.csv"]:
+    for f in ["industry_metrics.csv", "size_class_metrics.csv", "market_metrics.csv", "fx_rates.csv"] + SEC_FILES:
         used = set(pd.read_csv(DATA / f)["source"])
         assert used <= set(registry["source_id"]), f"{f}: fuentes sin registrar {used - set(registry['source_id'])}"
 

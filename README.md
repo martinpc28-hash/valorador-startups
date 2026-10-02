@@ -18,6 +18,8 @@ Aplicación web (Streamlit) que valora una startup a partir de las variables que
 | **Escenarios** | Pesimista, base y optimista con factores editables sobre crecimiento, margen y múltiplo |
 | **Monte Carlo** | 10.000 simulaciones con semilla fija. Crecimiento, margen y múltiplo correlacionados; fracaso simulado; P10/P50/P90 y probabilidad de alcanzar un MOIC objetivo |
 | **Caja y ronda** | Runway, caja mensual, capital que consume el plan y dilución adicional implícita |
+| **Comparables SEC** | Buscador de empresas reales en Form D (rondas privadas), Form C (startups con estados financieros) y S-1 (salidas a bolsa). Filtros por nombre, industria y antigüedad. Al seleccionar una o varias se comparan con tu startup y se ve en qué percentil queda tu ronda o tus ingresos. Un botón **precarga** los datos de la empresa elegida en el modelo |
+| **Fondos** | Métricas de un fondo de VC (DPI, RVPI, TVPI, MOIC e IRR con XIRR propio), curva J, proyección tipo Takahashi-Alexander y tamaño frente a los vehículos de VC que presentaron Form D. Flujos editables o cargados desde CSV |
 | **Supuestos** | Tabla editable por etapa: IRR objetivo, supervivencia, dilución, iliquidez |
 | **Datos y fuentes** | Cada número usado con su fuente, fecha, URL y avisos (reemplazos y recortes) |
 
@@ -54,9 +56,14 @@ Todos los datos son CSV versionados en `data/`. No hay archivos Excel y la app n
 |---|---|---|---|
 | [Aswath Damodaran](https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datacurrent.html) (EE. UU.) | 62 métricas para 94 industrias (betas, beta total, costo de capital, márgenes, múltiplos, crecimiento, reinversión, capex), 10 clases de capitalización y prima de riesgo implícita | 2026-01-09 | Uso libre ("no strings attached", [reglas de uso](https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datahistory.html#rules)); solo agregados por industria |
 | [Banco Central Europeo](https://data.ecb.europa.eu/) | Tipo de cambio EUR/USD de referencia y tipo a 10 años de la curva AAA de la zona euro (tasa libre de riesgo en EUR) | ver `data/fx_rates.csv` | Uso libre citando al BCE ([aviso legal](https://www.ecb.europa.eu/services/disclaimer/html/index.en.html)) |
+| [SEC EDGAR](https://www.sec.gov/data-research/sec-markets-data) Form D | Ofertas privadas: importe ofrecido y vendido, inversores, grupo de industria y rango de ingresos (empresa a empresa) | jul-2025 a jun-2026 | Información pública de sec.gov, redistribuible sin permiso ([política](https://www.sec.gov/about/privacy-information)) |
+| SEC EDGAR Form C | Crowdfunding: estados financieros de startups pequeñas (ingresos, beneficio neto, caja, deuda, empleados) y condiciones de la oferta | jul-2025 a jun-2026 | Igual que Form D |
+| SEC EDGAR S-1 + XBRL | Empresas que presentaron un S-1 con ingresos en XBRL; sin SPACs, trusts ni fondos | oct-2025 a sep-2026 | Igual que Form D |
 | Supuestos propios | Parámetros por etapa (semilla a madura) | — | Ilustrativos, editables en la app |
 
-`data/sources.csv` registra también las fuentes candidatas investigadas y su estado: FRED, SEC EDGAR (Form D y Form C), Kenneth French, Pablo Fernandez, Kroll, Carta y PitchBook-NVCA.
+Los datos de la SEC son por empresa. **No se guardan personas, firmantes, direcciones ni teléfonos**, solo datos de la empresa, y cada fila enlaza a su presentación en EDGAR. Ni Form D ni Form C informan la valoración. Form C tampoco informa la industria.
+
+`data/sources.csv` registra también las fuentes candidatas investigadas y su estado: FRED, Kenneth French, Pablo Fernandez, Kroll, Carta y PitchBook-NVCA.
 
 | Archivo | Contenido |
 |---|---|
@@ -68,6 +75,9 @@ Todos los datos son CSV versionados en `data/`. No hay archivos Excel y la app n
 | `data/fx_rates.csv` | Tipos de cambio con fecha |
 | `data/stage_assumptions.csv` | Supuestos por etapa |
 | `data/damodaran_manifest.csv` | Páginas extraídas, número de industrias y hash del HTML |
+| `data/sec_form_d.csv.gz`, `sec_form_c.csv.gz`, `sec_s1.csv.gz` | Una fila por empresa con su última presentación (comprimidos) |
+| `data/sec_form_d_funds.csv.gz` | Vehículos de VC (fondos y SPVs) que presentaron Form D |
+| `data/sec_manifest.csv` | Archivos de la SEC usados en cada generación |
 
 ### Limpieza aplicada
 
@@ -83,7 +93,14 @@ Los scripts documentan cómo se generó cada CSV. No hacen falta para ejecutar l
 ```bash
 python scripts/build_damodaran.py --refresh   # vuelve a descargar las 12 páginas
 python scripts/build_ecb.py
+python scripts/build_sec.py --quarters 4      # requiere SEC_USER_AGENT (ver abajo)
 pytest
+```
+
+La SEC exige que cada descarga se identifique con un nombre y un correo de contacto. Se pasa por variable de entorno y nunca se commitea:
+
+```bash
+set SEC_USER_AGENT=valorador-startups tu@correo.com
 ```
 
 ## Cómo añadir una fuente nueva
@@ -124,7 +141,8 @@ src/sources/           un módulo por fuente con la interfaz común
 src/data.py            carga de CSV, taxonomía y resolución de prioridades
 src/valuation.py       beta, DCF, método VC, múltiplos, escenarios
 src/montecarlo.py      simulación
-src/fund.py            métricas de fondos: DPI, RVPI, TVPI, XIRR, curva J (fase 2)
+src/fund.py            métricas de fondos: DPI, RVPI, TVPI, XIRR, curva J, proyección
+src/comparables.py     empresas de la SEC: búsqueda, comparación y precarga
 src/charts.py          gráficos y formato de números
 data/                  CSV con procedencia
 scripts/               un script por fuente
@@ -147,8 +165,7 @@ Despliegue continuo: crea un repositorio de Artifact Registry llamado `valorador
 
 ## Hoja de ruta
 
-- Fase 2: interfaz del módulo de fondos. Los cálculos de DPI, RVPI, TVPI, XIRR, curva J y proyección ya están en `src/fund.py` con pruebas.
-- Integrar SEC Form D (tamaño de ronda por industria) y Form C (métricas de startups en etapa semilla) tras verificar campos y condiciones.
+- Benchmarks de rentabilidad de fondos (DPI/TVPI por cosecha) cuando haya una fuente verificada y redistribuible.
 - FRED para la tasa libre de riesgo de EE. UU. al día.
 - Datos regionales de Damodaran (Europa, global), convertidos una sola vez de Excel a CSV.
 

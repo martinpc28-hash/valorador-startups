@@ -242,6 +242,28 @@ def histogram(values: np.ndarray, title: str, xtitle: str, markers: dict[str, fl
     return fig
 
 
+def log_histogram(values, title: str, xtitle: str, markers: dict[str, float]) -> go.Figure:
+    """Histograma de importes en escala log10 (rondas, ingresos, tamaños de fondo) con marcas de referencia."""
+    v = np.log10(np.asarray(values, dtype=float)[np.asarray(values, dtype=float) > 0])
+    fig = go.Figure(go.Histogram(
+        x=v, nbinsx=50, marker=dict(color=BLUE, line=dict(color="white", width=1)),
+        hovertemplate="Empresas: %{y}<extra></extra>",
+    ))
+    lo, hi = math.floor(v.min()), math.ceil(v.max())
+    ticks = list(range(lo, hi + 1))
+    labels = [fmt_money(10 ** t, "USD", 0).replace("USD ", "") for t in ticks]
+    for i, (name, x) in enumerate(markers.items()):
+        if x and x > 0:
+            fig.add_vline(x=math.log10(x), line=dict(color=ORANGE, width=2))
+            fig.add_annotation(x=math.log10(x), y=0.97 - 0.09 * i, yref="paper", text=f"{name}: {fmt_num(x / 1e6, 2)} M",
+                               showarrow=False, xanchor="left", xshift=4, font=dict(color=INK_SECONDARY, size=11),
+                               bgcolor="rgba(255,255,255,0.7)")
+    _layout(fig, title, height=320, showlegend=False, bargap=0.02)
+    fig.update_xaxes(title=xtitle, tickvals=ticks, ticktext=labels)
+    fig.update_yaxes(title="Empresas")
+    return fig
+
+
 def cash_chart(df: pd.DataFrame, currency: str) -> go.Figure:
     scale, unit = money_scale(df["Caja"].values)
     fig = go.Figure(go.Scatter(

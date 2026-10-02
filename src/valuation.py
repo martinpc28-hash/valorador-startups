@@ -285,6 +285,8 @@ def resolve_round(investment: float | None, pre_money: float | None, stake: floa
     given = [v is not None for v in (investment, pre_money, stake)]
     if sum(given) < 2:
         raise ValueError("Indica al menos dos de: inversión, pre-money y participación")
+    if (investment is not None and investment <= 0) or (pre_money is not None and pre_money <= 0):
+        raise ValueError("La inversión y la pre-money deben ser mayores que cero")
     if investment is not None and pre_money is not None:
         return RoundTerms(investment, pre_money, investment / (pre_money + investment))
     if investment is not None and stake is not None:

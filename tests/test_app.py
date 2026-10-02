@@ -38,7 +38,7 @@ def test_changing_industry_stage_currency_updates_results():
     assert any("Semilla" in c.value for c in other.caption)
 
 
-INDUSTRIES = pd.read_csv(DATA / "industry_crosswalk.csv").query("is_reference == False")["industry_std"].tolist()
+INDUSTRIES = pd.read_csv(DATA / "industry_crosswalk.csv").query("source == 'damodaran' and is_reference == False")["industry_std"].tolist()
 
 
 @pytest.mark.slow
@@ -50,6 +50,29 @@ def test_every_industry_runs(industry):
 @pytest.mark.parametrize("stage", ["Semilla", "Serie A", "Serie B", "Crecimiento", "Madura"])
 def test_every_stage_runs(stage):
     run(**{"Etapa": stage})
+
+
+def test_prefill_values_flow_into_the_model():
+    """Simula el botón de precarga: los valores en session_state reemplazan las entradas."""
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.run()
+    before = metric_value(at, "DCF (equity)")
+    at.session_state["rev0"] = 5_000_000.0
+    at.session_state["industry"] = "Drugs (Biotechnology)"
+    at.run()
+    assert not at.exception
+    assert any("Drugs (Biotechnology)" in c.value for c in at.caption)
+    assert metric_value(at, "DCF (equity)") != before
+
+
+def test_comparables_sources_and_fund_tab_render():
+    for ds in ("sec_form_c", "sec_s1"):
+        at = AppTest.from_file(APP, default_timeout=60)
+        at.run()
+        next(r for r in at.radio if r.label == "Fuente").set_value(ds)
+        at.run()
+        assert not at.exception, [e.value for e in at.exception]
+    assert any(m.label.startswith("TVPI") for m in at.metric)
 
 
 def test_vc_survival_mode_and_ebitda_exit():

@@ -1,0 +1,14 @@
+dataset,file,retrieved_at
+sec_form_d,https://www.sec.gov/files/datastandardsinnovation/data/form-d-data-sets/2026q2_d.zip,2026-10-02
+sec_form_d,https://www.sec.gov/files/structureddata/data/form-d-data-sets/2026q1_d.zip,2026-10-02
+sec_form_d,https://www.sec.gov/files/structureddata/data/form-d-data-sets/2025q4_d.zip,2026-10-02
+sec_form_d,https://www.sec.gov/files/structureddata/data/form-d-data-sets/2025q3_d.zip,2026-10-02
+sec_form_c,https://www.sec.gov/files/dera/data/crowdfunding-offerings-data-sets/2026q2_cf.zip,2026-10-02
+sec_form_c,https://www.sec.gov/files/dera/data/crowdfunding-offerings-data-sets/2026q1_cf.zip,2026-10-02
+sec_form_c,https://www.sec.gov/files/dera/data/crowdfunding-offerings-data-sets/2025q4_cf.zip,2026-10-02
+sec_form_c,https://www.sec.gov/files/dera/data/crowdfunding-offerings-data-sets/2025q3_cf.zip,2026-10-02
+sec_s1,https://www.sec.gov/Archives/edgar/full-index/2026/QTR3/form.idx,2026-10-02
+sec_s1,https://www.sec.gov/Archives/edgar/full-index/2026/QTR2/form.idx,2026-10-02
+sec_s1,https://www.sec.gov/Archives/edgar/full-index/2026/QTR1/form.idx,2026-10-02
+sec_s1,https://www.sec.gov/Archives/edgar/full-index/2025/QTR4/form.idx,2026-10-02
+sec_s1,https://data.sec.gov/api/xbrl/frames/,2026-10-02

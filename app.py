@@ -27,6 +27,8 @@ from src.data import (
     load_sources,
     load_stage_assumptions,
 )
+from src import comparables as cmp
+from src.fund import fund_metrics, j_curve, project_cash_flows
 from src.montecarlo import MCSettings, simulate
 from src.valuation import (
     DEFAULT_SCENARIOS,
@@ -83,15 +85,49 @@ erp_row = latest_series(D["market"], "implied_erp_fcfe")
 fx_row = latest_fx(D["fx"])
 
 
+# Los valores por defecto viven en st.session_state (no en el parámetro `value`), para que la
+# precarga desde la pestaña de comparables pueda reescribirlos antes de dibujar los widgets.
+
+def _default(key: str, value) -> None:
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+
 def pct_input(label: str, value: float, key: str, min_value: float = -100.0, max_value: float = 500.0,
               step: float = 0.5, help: str | None = None) -> float:
     """Entrada en porcentaje que devuelve un decimal."""
-    return st.number_input(label, min_value, max_value, float(round(value * 100, 2)), step,
-                           format="%.2f", key=key, help=help) / 100.0
+    _default(key, float(round(value * 100, 2)))
+    return st.number_input(label, min_value, max_value, step=step, format="%.2f", key=key, help=help) / 100.0
 
 
 def money_input(label: str, value: float, key: str, help: str | None = None, min_value: float = 0.0) -> float:
-    return st.number_input(label, min_value, None, float(value), 50_000.0, format="%.0f", key=key, help=help)
+    _default(key, float(value))
+    return st.number_input(label, min_value, None, step=50_000.0, format="%.0f", key=key, help=help)
+
+
+def usd_rate(cur: str) -> float:
+    """USD por unidad de la moneda base."""
+    return 1.0 if cur == "USD" else float(fx_row["rate"])
+
+
+def apply_prefill(values: dict, cur: str) -> None:
+    """Callback del botón de precarga: escribe en las entradas de la barra lateral (importes en USD)."""
+    r = usd_rate(cur)
+    if "revenue" in values:
+        st.session_state["rev0"] = round(values["revenue"] / r)
+    if "growth" in values:
+        st.session_state["growth"] = round(values["growth"] * 100, 2)
+    if "current_margin" in values:
+        st.session_state["cm"] = round(values["current_margin"] * 100, 2)
+    if "cash" in values:
+        st.session_state["cash"] = round(values["cash"] / r)
+    if "investment" in values:
+        st.session_state["inv"] = round(values["investment"] / r)
+        if st.session_state.get("solve_for") == "Inversión":
+            st.session_state["solve_for"] = "Participación"
+    if "industry" in values and values["industry"] in set(industries["industry_std"]):
+        st.session_state["industry"] = values["industry"]
+    st.session_state["prefill_msg"] = values.get("_label", "")
 
 
 # ======================================================================= barra lateral
@@ -102,9 +138,12 @@ with st.sidebar:
                         help="Los importes se introducen y se muestran en esta moneda.")
     sym = ch.CURRENCY_SYMBOL[currency]
 
+    if st.session_state.get("prefill_msg"):
+        st.success(f"Datos precargados de {st.session_state.pop('prefill_msg').rstrip('.')}. Revísalos antes de usarlos.")
     options = industries["industry_std"].tolist()
+    _default("industry", "Software (System & Application)")
     industry = st.selectbox(
-        "Industria", options, index=options.index("Software (System & Application)"),
+        "Industria", options, key="industry",
         format_func=lambda i: f"{i} · {sector_of[i]}",
         help="Taxonomía propia (industry_std) con equivalencias desde la clasificación de cada fuente.",
     )
@@ -129,12 +168,16 @@ with st.sidebar:
     cash = money_input(f"Caja disponible ({sym})", 1_200_000, "cash")
 
     st.subheader("Ronda")
-    solve_for = st.radio("Calcular", ["Participación", "Pre-money", "Inversión"], horizontal=True,
+    solve_for = st.radio("Calcular", ["Participación", "Pre-money", "Inversión"], horizontal=True, key="solve_for",
                          help="Participación = inversión / (pre-money + inversión). Introduce dos y se calcula la tercera.")
     inv_in = money_input(f"Inversión ({sym})", 3_000_000, "inv") if solve_for != "Inversión" else None
     pre_in = money_input(f"Pre-money propuesta ({sym})", 12_000_000, "pre") if solve_for != "Pre-money" else None
     stake_in = pct_input("Participación buscada (%)", 0.20, "stake", 0.1, 99.0) if solve_for != "Participación" else None
-    terms = resolve_round(inv_in, pre_in, stake_in)
+    try:
+        terms = resolve_round(inv_in, pre_in, stake_in)
+    except ValueError as e:
+        st.error(str(e))
+        st.stop()
     st.caption(
         f"Inversión {fmt_money(terms.investment, currency)} · pre-money {fmt_money(terms.pre_money, currency)} · "
         f"post-money {fmt_money(terms.post_money, currency)} · participación {fmt_pct(terms.stake)}"
@@ -179,7 +222,8 @@ st.title("Valorador de Startups")
 st.caption(f"{industry} · {sector_of[industry]} · etapa {stage_label} · moneda {currency}")
 warn_box = st.container()
 
-tab_names = ["Resumen", "DCF", "Método VC", "Múltiplos", "Escenarios", "Monte Carlo", "Caja y ronda", "Supuestos", "Datos y fuentes"]
+tab_names = ["Resumen", "DCF", "Método VC", "Múltiplos", "Escenarios", "Monte Carlo", "Caja y ronda",
+             "Comparables SEC", "Fondos", "Supuestos", "Datos y fuentes"]
 T = dict(zip(tab_names, st.tabs(tab_names)))
 
 with T["Supuestos"]:
@@ -696,6 +740,199 @@ with T["Datos y fuentes"]:
 
     st.subheader("Registro de fuentes")
     st.dataframe(D["sources"], hide_index=True, width="stretch")
+
+# ======================================================================= Comparables SEC
+
+
+@st.cache_data(show_spinner=False)
+def load_sec(dataset: str) -> pd.DataFrame:
+    return cmp.load(dataset)
+
+
+with T["Comparables SEC"]:
+    rate = usd_rate(currency)
+    st.caption(
+        "Empresas individuales con datos públicos presentados ante la SEC (EE. UU.), últimos 4 trimestres. "
+        "Importes originales en USD; se muestran en la moneda base. Selecciona una o varias filas para compararlas con "
+        "tu startup y, si quieres, precargar sus datos en el modelo."
+    )
+    ds = st.radio("Fuente", list(cmp.DATASETS), format_func=cmp.DATASETS.get, horizontal=True, key="sec_ds")
+    df_all = load_sec(ds)
+    f1, f2, f3 = st.columns([2, 2, 1])
+    text = f1.text_input("Buscar por nombre", key=f"sec_q_{ds}", placeholder="p. ej. robotics, health, AI…")
+    if ds == "sec_form_c":
+        f2.caption("Form C no informa la industria: filtra por nombre o por ingresos.")
+        inds = None
+    else:
+        ind_opts = sorted(df_all["industry_std"].dropna().unique())
+        inds = f2.multiselect("Industria", ind_opts, default=[industry] if industry in ind_opts else [],
+                              key=f"sec_ind_{ds}_{industry}")
+    young = f3.checkbox("Constituidas hace < 5 años", True, key="sec_young") if ds == "sec_form_d" else False
+    with_rev = f3.checkbox("Solo con ingresos", True, key="sec_rev") if ds == "sec_form_c" else False
+    res = cmp.search(df_all, text, inds, young, with_rev)
+
+    cols = {
+        "sec_form_d": ["name", "industry_std", "state", "revenue_range", "round_size", "total_sold", "n_investors", "first_sale_date", "filing_date", "url"],
+        "sec_form_c": ["name", "state", "revenue", "growth", "net_margin", "cash", "employees", "round_size", "filing_date", "url"],
+        "sec_s1": ["name", "industry_std", "state", "fiscal_year", "revenue", "growth", "operating_margin", "filing_date", "url"],
+    }[ds]
+    labels = {"name": "Empresa", "industry_std": "Industria", "state": "Estado/país", "revenue_range": "Rango de ingresos",
+              "round_size": f"Oferta ({sym})", "total_sold": f"Vendido ({sym})", "n_investors": "Inversores",
+              "first_sale_date": "Primera venta", "filing_date": "Presentación", "revenue": f"Ingresos ({sym})",
+              "growth": "Crecimiento", "net_margin": "Margen neto", "cash": f"Caja ({sym})", "employees": "Empleados",
+              "operating_margin": "Margen operativo", "fiscal_year": "Ejercicio", "url": "EDGAR"}
+    view = res[cols].copy()
+    for c in ("round_size", "total_sold", "revenue", "cash"):
+        if c in view:
+            view[c] = view[c] / rate
+    n_total = len(cmp.search(df_all, text, inds, young, with_rev, limit=10**7))
+    st.caption(f"{n_total:,} empresas coinciden".replace(",", ".") + (" (se muestran las 500 más recientes)." if n_total > 500 else "."))
+    event = st.dataframe(
+        view.rename(columns=labels), hide_index=True, width="stretch", height=320,
+        on_select="rerun", selection_mode="multi-row", key=f"sec_table_{ds}",
+        column_config={
+            "EDGAR": st.column_config.LinkColumn("EDGAR", display_text="ver filing"),
+            "Crecimiento": st.column_config.NumberColumn(format="percent"),
+            "Margen neto": st.column_config.NumberColumn(format="percent"),
+            "Margen operativo": st.column_config.NumberColumn(format="percent"),
+            **{labels[c]: st.column_config.NumberColumn(format="compact") for c in ("round_size", "total_sold", "revenue", "cash") if c in cols},
+        },
+    )
+    picked = res.iloc[event.selection.rows] if event and event.selection.rows else res.iloc[0:0]
+
+    # Contexto: dónde queda tu startup en la distribución de la fuente
+    if ds == "sec_form_d":
+        sample = df_all[df_all["industry_std"].isin(inds)] if inds else df_all
+        sample = sample[sample["inc_within_5y"].astype(bool)] if young else sample
+        your, series, what = terms.investment * rate, sample["round_size"], "tamaño de ronda"
+    else:
+        sample = df_all[df_all["industry_std"].isin(inds)] if inds else df_all
+        your, series, what = revenue0 * rate, sample["revenue"], "ingresos"
+    pctl = cmp.percentile_of(your, series[series > 0])
+    k1, k2, k3 = st.columns(3)
+    metric(k1, f"Empresas en la muestra", f"{int((series > 0).sum()):,}".replace(",", "."))
+    metric(k2, f"Mediana de {what}", fmt_money(float(series[series > 0].median()) / rate, currency) if (series > 0).any() else "—")
+    metric(k3, f"Tu {what}: percentil", fmt_pct(pctl, 0) if not math.isnan(pctl) else "—",
+           help=f"Porcentaje de la muestra con {what} menor que el tuyo ({fmt_money(your / rate, currency)}).")
+    if (series > 0).sum() >= 10:
+        st.plotly_chart(ch.log_histogram(series[series > 0] / rate, f"Distribución de {what} en la muestra",
+                                         f"{what.capitalize()} ({sym}, escala logarítmica)",
+                                         {"Tu startup": your / rate}), width="stretch")
+
+    if not picked.empty:
+        st.subheader("Comparación con tu startup")
+        user = {
+            "industry_std": industry, "revenue": revenue0, "growth": growth, "operating_margin": current_margin,
+            "cash": cash, "round_size": terms.investment, "filing_date": "—",
+        }
+        shown = picked.copy()
+        for c in ("revenue", "revenue_est", "cash", "round_size", "total_sold"):
+            if c in shown:
+                shown[c] = shown[c] / rate
+        st.dataframe(cmp.comparison_table(user, shown, lambda x: fmt_money(x, currency), fmt_pct),
+                     hide_index=True, width="stretch")
+
+        st.subheader("Precargar en el modelo")
+        who = st.selectbox("Empresa", picked.index, format_func=lambda i: picked.loc[i, "name"], key=f"sec_prefill_{ds}")
+        pf = cmp.prefill_from(picked.loc[who], ds)
+        if pf.values:
+            prev = []
+            for k, v in pf.values.items():
+                shown_v = (fmt_money(v / rate, currency) if k in ("revenue", "cash", "investment")
+                           else fmt_pct(v) if k in ("growth", "current_margin") else v)
+                prev.append({"Entrada": {"revenue": "Ingresos 12 m", "growth": "Crecimiento anual", "current_margin": "Margen operativo actual",
+                                         "cash": "Caja", "investment": "Inversión", "industry": "Industria"}[k],
+                             "Valor": shown_v, "Origen": pf.notes[k]})
+            st.dataframe(pd.DataFrame(prev), hide_index=True, width="stretch")
+            st.button(
+                "Precargar estos datos en el modelo", type="primary", key=f"sec_btn_{ds}",
+                on_click=apply_prefill, args=({**pf.values, "_label": str(picked.loc[who, "name"])}, currency),
+                help="Sustituye esas entradas de la barra lateral; el resto se mantiene. Todo se recalcula al instante.",
+            )
+        else:
+            st.info("Esta presentación no trae datos que se puedan cargar en el modelo.")
+
+# ======================================================================= Fondos
+
+EXAMPLE_FUND = pd.DataFrame({
+    "date": pd.to_datetime(["2019-03-31", "2019-12-31", "2020-12-31", "2021-12-31", "2022-12-31",
+                            "2023-12-31", "2024-12-31", "2025-12-31"]),
+    "capital_call": [20.0, 25.0, 20.0, 15.0, 10.0, 5.0, 0.0, 0.0],
+    "distribution": [0.0, 0.0, 0.0, 5.0, 10.0, 25.0, 40.0, 30.0],
+    "nav": [18.0, 40.0, 62.0, 85.0, 95.0, 92.0, 80.0, 70.0],
+})
+
+with T["Fondos"]:
+    st.caption("Análisis de un fondo de VC desde el punto de vista del inversor (LP). Importes en la moneda base, "
+               "en las unidades que prefieras (p. ej. millones).")
+    up = st.file_uploader("Cargar flujos desde CSV (columnas: date, capital_call, distribution, nav)", type="csv", key="fund_csv")
+    base_flows = EXAMPLE_FUND
+    if up is not None:
+        try:
+            base_flows = pd.read_csv(up, parse_dates=["date"])[["date", "capital_call", "distribution", "nav"]]
+        except Exception as e:  # noqa: BLE001 — el usuario debe ver por qué no se pudo leer
+            st.error(f"No se pudo leer el CSV: {e}")
+    else:
+        st.info("Datos de **ejemplo ilustrativo**. Edita la tabla o carga tu CSV.")
+    flows = st.data_editor(
+        base_flows, num_rows="dynamic", hide_index=True, width="stretch", key=f"fund_editor_{up.name if up else 'ej'}",
+        column_config={
+            "date": st.column_config.DateColumn("Fecha", required=True),
+            "capital_call": st.column_config.NumberColumn("Capital llamado", min_value=0.0),
+            "distribution": st.column_config.NumberColumn("Distribución", min_value=0.0),
+            "nav": st.column_config.NumberColumn("Valor residual (NAV)", min_value=0.0),
+        },
+    ).dropna(subset=["date"])
+
+    if len(flows) >= 2 and flows["capital_call"].fillna(0).sum() > 0:
+        fm = fund_metrics(flows)
+        c = st.columns(6)
+        metric(c[0], "Capital desembolsado", fmt_num(fm.paid_in, 1))
+        metric(c[1], "DPI", fmt_mult(fm.dpi), help="Distribuciones / capital desembolsado")
+        metric(c[2], "RVPI", fmt_mult(fm.rvpi), help="Valor residual (NAV) / capital desembolsado")
+        metric(c[3], "TVPI", fmt_mult(fm.tvpi), help="DPI + RVPI")
+        metric(c[4], "MOIC", fmt_mult(fm.moic), help="(Distribuciones + NAV) / capital desembolsado")
+        metric(c[5], "IRR (XIRR)", fmt_pct(fm.irr), help="Con fechas reales; el último NAV cuenta como valor terminal.")
+        st.plotly_chart(ch.jcurve_chart(j_curve(flows), currency), width="stretch")
+    else:
+        st.warning("Introduce al menos dos fechas y alguna llamada de capital para calcular las métricas.")
+
+    st.subheader("Proyección simple de flujos")
+    st.caption("Modelo tipo Takahashi-Alexander (Yale): llamadas según un calendario y distribuciones que crecen con la edad del fondo.")
+    p1, p2, p3, p4 = st.columns(4)
+    commitment = p1.number_input("Compromiso", 1.0, 1e12, 100.0, 10.0, key="fund_commit")
+    years_f = p2.slider("Vida del fondo (años)", 6, 15, 12, key="fund_years")
+    growth_f = p3.number_input("Crecimiento anual del NAV (%)", -20.0, 50.0, 12.0, 1.0, key="fund_growth") / 100
+    bow = p4.number_input("Factor de distribución (bow)", 0.5, 6.0, 2.5, 0.1, key="fund_bow",
+                          help="Mayor = distribuciones más concentradas al final de la vida del fondo.")
+    proj_f = project_cash_flows(commitment, years_f, growth=growth_f, bow=bow)
+    proj_flows = pd.DataFrame({
+        "date": pd.to_datetime([f"{2026 + y}-12-31" for y in proj_f["Año"]]),
+        "capital_call": proj_f["Llamadas"], "distribution": proj_f["Distribuciones"], "nav": proj_f["NAV"],
+    })
+    pm_f = fund_metrics(proj_flows)
+    c = st.columns(4)
+    metric(c[0], "TVPI proyectado", fmt_mult(pm_f.tvpi))
+    metric(c[1], "DPI proyectado", fmt_mult(pm_f.dpi))
+    metric(c[2], "IRR proyectada", fmt_pct(pm_f.irr))
+    metric(c[3], "NAV final", fmt_num(proj_f["NAV"].iloc[-1], 1))
+    st.plotly_chart(ch.jcurve_chart(j_curve(proj_flows), currency), width="stretch")
+    with st.expander("Tabla de la proyección"):
+        st.dataframe(proj_f.round(2), hide_index=True, width="stretch")
+
+    st.subheader("Contexto: tamaño de vehículos de VC (Form D)")
+    funds = load_sec("sec_form_d_funds")
+    sizes = funds["total_offering"].fillna(funds["total_sold"])
+    sizes = sizes[sizes > 0]
+    fund_size = st.number_input(f"Tamaño de tu fondo ({sym})", 0.0, None, 50_000_000.0, 1_000_000.0, format="%.0f", key="fund_size")
+    k1, k2, k3 = st.columns(3)
+    metric(k1, "Vehículos de VC en la muestra", f"{len(sizes):,}".replace(",", "."))
+    metric(k2, "Mediana del tamaño", fmt_money(sizes.median() / usd_rate(currency), currency))
+    metric(k3, "Percentil de tu fondo", fmt_pct(cmp.percentile_of(fund_size * usd_rate(currency), sizes), 0))
+    st.plotly_chart(ch.log_histogram(sizes / usd_rate(currency), "Tamaño de los vehículos de VC que presentaron Form D",
+                                     f"Tamaño ({sym}, escala logarítmica)", {"Tu fondo": fund_size}), width="stretch")
+    st.caption("Incluye fondos y vehículos de una sola inversión (SPVs), por eso la mediana es baja. Es contexto de tamaño, "
+               "no un benchmark de rentabilidad: no hay todavía una fuente verificada y redistribuible de retornos de fondos.")
 
 # ======================================================================= pie
 

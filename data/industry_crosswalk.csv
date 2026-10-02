@@ -95,3 +95,156 @@ damodaran,Utility (General),Utility (General),Servicios públicos,False
 damodaran,Utility (Water),Utility (Water),Servicios públicos,False
 damodaran,Total Market,Total Market,Referencia,True
 damodaran,Total Market (without financials),Total Market (without financials),Referencia,True
+sec_form_d,Agriculture,Farming/Agriculture,Consumo,False
+sec_form_d,Airlines and Airports,Air Transport,Transporte,False
+sec_form_d,Biotechnology,Drugs (Biotechnology),Salud,False
+sec_form_d,Business Services,Business & Consumer Services,Servicios,False
+sec_form_d,Coal Mining,Coal & Related Energy,Energía y materiales,False
+sec_form_d,Commercial,Real Estate (Operations & Services),Inmobiliario,False
+sec_form_d,Commercial Banking,Banks (Regional),Financiero,False
+sec_form_d,Computers,Computers/Peripherals,Tecnología,False
+sec_form_d,Construction,Engineering/Construction,Industria,False
+sec_form_d,Electric Utilities,Utility (General),Servicios públicos,False
+sec_form_d,Energy Conservation,Green & Renewable Energy,Energía y materiales,False
+sec_form_d,Environmental Services,Environmental & Waste Services,Servicios,False
+sec_form_d,Health Insurance,Healthcare Support Services,Salud,False
+sec_form_d,Hospitals and Physicians,Hospitals/Healthcare Facilities,Salud,False
+sec_form_d,Insurance,Insurance (General),Financiero,False
+sec_form_d,Investing,Investments & Asset Management,Financiero,False
+sec_form_d,Investment Banking,Brokerage & Investment Banking,Financiero,False
+sec_form_d,Lodging and Conventions,Hotel/Gaming,Consumo,False
+sec_form_d,Manufacturing,Machinery,Industria,False
+sec_form_d,Oil and Gas,Oil/Gas (Production and Exploration),Energía y materiales,False
+sec_form_d,Other,Diversified,Industria,False
+sec_form_d,Other Banking and Financial Services,Financial Svcs. (Non-bank & Insurance),Financiero,False
+sec_form_d,Other Energy,Power,Servicios públicos,False
+sec_form_d,Other Health Care,Healthcare Products,Salud,False
+sec_form_d,Other Real Estate,Real Estate (General/Diversified),Inmobiliario,False
+sec_form_d,Other Technology,Software (System & Application),Tecnología,False
+sec_form_d,Other Travel,Recreation,Consumo,False
+sec_form_d,Pharmaceuticals,Drugs (Pharmaceutical),Salud,False
+sec_form_d,Pooled Investment Fund,Investments & Asset Management,Financiero,False
+sec_form_d,REITS and Finance,R.E.I.T.,Inmobiliario,False
+sec_form_d,Residential,Homebuilding,Inmobiliario,False
+sec_form_d,Restaurants,Restaurant/Dining,Consumo,False
+sec_form_d,Retailing,Retail (General),Consumo,False
+sec_form_d,Telecommunications,Telecom. Services,Medios y telecomunicaciones,False
+sec_form_d,Tourism and Travel Services,Recreation,Consumo,False
+sec_sic,0100,Farming/Agriculture,Consumo,False
+sec_sic,1000,Metals & Mining,Energía y materiales,False
+sec_sic,1040,Precious Metals,Energía y materiales,False
+sec_sic,1220,Coal & Related Energy,Energía y materiales,False
+sec_sic,1311,Oil/Gas (Production and Exploration),Energía y materiales,False
+sec_sic,1389,Oilfield Svcs/Equip.,Energía y materiales,False
+sec_sic,1400,Metals & Mining,Energía y materiales,False
+sec_sic,1540,Engineering/Construction,Industria,False
+sec_sic,1700,Engineering/Construction,Industria,False
+sec_sic,2000,Food Processing,Consumo,False
+sec_sic,2030,Food Processing,Consumo,False
+sec_sic,2060,Food Processing,Consumo,False
+sec_sic,2080,Beverage (Alcoholic),Consumo,False
+sec_sic,2086,Beverage (Soft),Consumo,False
+sec_sic,2650,Packaging & Container,Industria,False
+sec_sic,2721,Publishing & Newspapers,Medios y telecomunicaciones,False
+sec_sic,2800,Chemical (Diversified),Energía y materiales,False
+sec_sic,2833,Drugs (Pharmaceutical),Salud,False
+sec_sic,2834,Drugs (Pharmaceutical),Salud,False
+sec_sic,2835,Drugs (Biotechnology),Salud,False
+sec_sic,2836,Drugs (Biotechnology),Salud,False
+sec_sic,2844,Household Products,Consumo,False
+sec_sic,2860,Chemical (Specialty),Energía y materiales,False
+sec_sic,3341,Metals & Mining,Energía y materiales,False
+sec_sic,3440,Building Materials,Industria,False
+sec_sic,3443,Machinery,Industria,False
+sec_sic,3480,Aerospace/Defense,Industria,False
+sec_sic,3490,Machinery,Industria,False
+sec_sic,3510,Machinery,Industria,False
+sec_sic,3560,Machinery,Industria,False
+sec_sic,3569,Machinery,Industria,False
+sec_sic,3572,Computers/Peripherals,Tecnología,False
+sec_sic,3576,Computers/Peripherals,Tecnología,False
+sec_sic,3577,Computers/Peripherals,Tecnología,False
+sec_sic,3580,Machinery,Industria,False
+sec_sic,3590,Machinery,Industria,False
+sec_sic,3620,Electrical Equipment,Industria,False
+sec_sic,3663,Telecom. Equipment,Tecnología,False
+sec_sic,3669,Telecom. Equipment,Tecnología,False
+sec_sic,3674,Semiconductor,Tecnología,False
+sec_sic,3679,Electronics (General),Tecnología,False
+sec_sic,3690,Electrical Equipment,Industria,False
+sec_sic,3711,Auto & Truck,Consumo,False
+sec_sic,3714,Auto Parts,Consumo,False
+sec_sic,3721,Aerospace/Defense,Industria,False
+sec_sic,3730,Shipbuilding & Marine,Industria,False
+sec_sic,3760,Aerospace/Defense,Industria,False
+sec_sic,3823,Electronics (General),Tecnología,False
+sec_sic,3825,Electronics (General),Tecnología,False
+sec_sic,3827,Electronics (General),Tecnología,False
+sec_sic,3829,Electronics (General),Tecnología,False
+sec_sic,3841,Healthcare Products,Salud,False
+sec_sic,3842,Healthcare Products,Salud,False
+sec_sic,3845,Healthcare Products,Salud,False
+sec_sic,3851,Healthcare Products,Salud,False
+sec_sic,3861,Electronics (Consumer & Office),Tecnología,False
+sec_sic,4512,Air Transport,Transporte,False
+sec_sic,4522,Air Transport,Transporte,False
+sec_sic,4813,Telecom. Services,Medios y telecomunicaciones,False
+sec_sic,4832,Broadcasting,Medios y telecomunicaciones,False
+sec_sic,4841,Cable TV,Medios y telecomunicaciones,False
+sec_sic,4899,Telecom. Services,Medios y telecomunicaciones,False
+sec_sic,4911,Power,Servicios públicos,False
+sec_sic,4931,Utility (General),Servicios públicos,False
+sec_sic,4953,Environmental & Waste Services,Servicios,False
+sec_sic,5030,Retail (Distributors),Consumo,False
+sec_sic,5051,Retail (Distributors),Consumo,False
+sec_sic,5063,Retail (Distributors),Consumo,False
+sec_sic,5065,Retail (Distributors),Consumo,False
+sec_sic,5122,Retail (Distributors),Consumo,False
+sec_sic,5141,Food Wholesalers,Consumo,False
+sec_sic,5200,Retail (Building Supply),Consumo,False
+sec_sic,5411,Retail (Grocery and Food),Consumo,False
+sec_sic,5500,Retail (Automotive),Consumo,False
+sec_sic,5531,Retail (Automotive),Consumo,False
+sec_sic,5600,Retail (Special Lines),Consumo,False
+sec_sic,5700,Retail (Special Lines),Consumo,False
+sec_sic,5810,Restaurant/Dining,Consumo,False
+sec_sic,5812,Restaurant/Dining,Consumo,False
+sec_sic,5900,Retail (Special Lines),Consumo,False
+sec_sic,5961,Retail (General),Consumo,False
+sec_sic,5990,Retail (Special Lines),Consumo,False
+sec_sic,6141,Financial Svcs. (Non-bank & Insurance),Financiero,False
+sec_sic,6153,Financial Svcs. (Non-bank & Insurance),Financiero,False
+sec_sic,6162,Financial Svcs. (Non-bank & Insurance),Financiero,False
+sec_sic,6163,Financial Svcs. (Non-bank & Insurance),Financiero,False
+sec_sic,6199,Financial Svcs. (Non-bank & Insurance),Financiero,False
+sec_sic,6211,Brokerage & Investment Banking,Financiero,False
+sec_sic,6282,Investments & Asset Management,Financiero,False
+sec_sic,6331,Insurance (Prop/Cas.),Financiero,False
+sec_sic,6411,Insurance (General),Financiero,False
+sec_sic,6500,Real Estate (General/Diversified),Inmobiliario,False
+sec_sic,6794,Business & Consumer Services,Servicios,False
+sec_sic,7200,Business & Consumer Services,Servicios,False
+sec_sic,7310,Advertising,Medios y telecomunicaciones,False
+sec_sic,7311,Advertising,Medios y telecomunicaciones,False
+sec_sic,7331,Advertising,Medios y telecomunicaciones,False
+sec_sic,7340,Business & Consumer Services,Servicios,False
+sec_sic,7359,Business & Consumer Services,Servicios,False
+sec_sic,7361,Business & Consumer Services,Servicios,False
+sec_sic,7370,Software (Internet),Tecnología,False
+sec_sic,7371,Computer Services,Tecnología,False
+sec_sic,7372,Software (System & Application),Tecnología,False
+sec_sic,7373,Computer Services,Tecnología,False
+sec_sic,7374,Information Services,Tecnología,False
+sec_sic,7389,Business & Consumer Services,Servicios,False
+sec_sic,7812,Entertainment,Medios y telecomunicaciones,False
+sec_sic,7900,Recreation,Consumo,False
+sec_sic,8000,Healthcare Support Services,Salud,False
+sec_sic,8011,Hospitals/Healthcare Facilities,Salud,False
+sec_sic,8071,Healthcare Support Services,Salud,False
+sec_sic,8082,Healthcare Support Services,Salud,False
+sec_sic,8090,Healthcare Support Services,Salud,False
+sec_sic,8200,Education,Servicios,False
+sec_sic,8711,Engineering/Construction,Industria,False
+sec_sic,8731,Drugs (Biotechnology),Salud,False
+sec_sic,8734,Business & Consumer Services,Servicios,False
+sec_sic,8742,Business & Consumer Services,Servicios,False
