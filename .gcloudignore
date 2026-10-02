@@ -1,0 +1,13 @@
+# Archivos que no se suben a Cloud Build. tests/ y scripts/ sí se suben
+# (cloudbuild.yaml ejecuta las pruebas antes de construir la imagen).
+.gcloudignore
+.gitignore
+.git
+.venv/
+.cache/
+.claude/
+.pytest_cache/
+__pycache__/
+*.pyc
+.env
+.env.*

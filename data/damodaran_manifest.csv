@@ -1,0 +1,13 @@
+page,url,kind,n_rows,n_industries,as_of,retrieved_at,sha256
+Betas,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/Betas.html,industry,96,94,2026-01-09,2026-10-02,10993bab71504e2449ccdd9e3d67fa4da983bed380b2f4486e5200a7b258616b
+totalbeta,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/totalbeta.html,industry,96,94,2026-01-09,2026-10-02,916df085b49f9d73f3c23b27da1bae77fa816bcecc900ea9763f17f444dc749d
+wacc,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/wacc.html,industry,96,94,2026-01-09,2026-10-02,04a4dd2188cbc9081d232b14599c299487ca67d54fb8e7e397bc4b8a2246d8e8
+margin,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/margin.html,industry,96,94,2026-01-09,2026-10-02,56c79e830dff33433c1ee66cea14ab2156d465a8de349d734f40235899bf1090
+psdata,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/psdata.html,industry,96,94,2026-01-09,2026-10-02,14b5c270f8c5c348fc897e7ee473f85266e9b2db050664a6d8803cdc3b7ce493
+vebitda,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/vebitda.html,industry,96,94,2026-01-09,2026-10-02,84dd21aebd7820cd1febccaa12266b5827a5cbafe021072baab04d8e263fbd90
+histgr,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/histgr.html,industry,96,94,2026-01-09,2026-10-02,b56c7241d1f1f06bcd9cae7a346ae8c876f3382e44c0a73a12c0b0a6ab1279b8
+fundgrEB,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/fundgrEB.html,industry,96,94,2026-01-09,2026-10-02,286a0de0a2846483b7c960894d3abd44c3984150de3c3cfa991e58f327c58ae1
+capex,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/capex.html,industry,96,94,2026-01-09,2026-10-02,713eaa7f0f99997d9e3fa60249adc3547cc0934929f4a875ec94869c17806209
+mktcaprisk,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/mktcaprisk.html,size_class,11,0,2026-01-09,2026-10-02,b2bef627d7f0a599a3d7b82c7988375626496b840451ca6297e87cc4bc20066c
+mktcapmult,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/mktcapmult.html,size_class,11,0,2026-01-09,2026-10-02,11041cdf040f19de1d73408163313f08b771f1aadfccce3c1d599a1cfab3acff
+histimpl,https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/histimpl.html,market,66,0,2026-01-09,2026-10-02,53eee142149a6948bdfbca62fe4beb8d6aac7a12ba7b4c61d94fea60258ab5e9

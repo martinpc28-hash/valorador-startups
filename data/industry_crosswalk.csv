@@ -1,0 +1,97 @@
+source,industry_original,industry_std,sector,is_reference
+damodaran,Advertising,Advertising,Medios y telecomunicaciones,False
+damodaran,Aerospace/Defense,Aerospace/Defense,Industria,False
+damodaran,Air Transport,Air Transport,Transporte,False
+damodaran,Apparel,Apparel,Consumo,False
+damodaran,Auto & Truck,Auto & Truck,Consumo,False
+damodaran,Auto Parts,Auto Parts,Consumo,False
+damodaran,Bank (Money Center),Bank (Money Center),Financiero,False
+damodaran,Banks (Regional),Banks (Regional),Financiero,False
+damodaran,Beverage (Alcoholic),Beverage (Alcoholic),Consumo,False
+damodaran,Beverage (Soft),Beverage (Soft),Consumo,False
+damodaran,Broadcasting,Broadcasting,Medios y telecomunicaciones,False
+damodaran,Brokerage & Investment Banking,Brokerage & Investment Banking,Financiero,False
+damodaran,Building Materials,Building Materials,Industria,False
+damodaran,Business & Consumer Services,Business & Consumer Services,Servicios,False
+damodaran,Cable TV,Cable TV,Medios y telecomunicaciones,False
+damodaran,Chemical (Basic),Chemical (Basic),Energía y materiales,False
+damodaran,Chemical (Diversified),Chemical (Diversified),Energía y materiales,False
+damodaran,Chemical (Specialty),Chemical (Specialty),Energía y materiales,False
+damodaran,Coal & Related Energy,Coal & Related Energy,Energía y materiales,False
+damodaran,Computer Services,Computer Services,Tecnología,False
+damodaran,Computers/Peripherals,Computers/Peripherals,Tecnología,False
+damodaran,Construction Supplies,Construction Supplies,Industria,False
+damodaran,Diversified,Diversified,Industria,False
+damodaran,Drugs (Biotechnology),Drugs (Biotechnology),Salud,False
+damodaran,Drugs (Pharmaceutical),Drugs (Pharmaceutical),Salud,False
+damodaran,Education,Education,Servicios,False
+damodaran,Electrical Equipment,Electrical Equipment,Industria,False
+damodaran,Electronics (Consumer & Office),Electronics (Consumer & Office),Tecnología,False
+damodaran,Electronics (General),Electronics (General),Tecnología,False
+damodaran,Engineering/Construction,Engineering/Construction,Industria,False
+damodaran,Entertainment,Entertainment,Medios y telecomunicaciones,False
+damodaran,Environmental & Waste Services,Environmental & Waste Services,Servicios,False
+damodaran,Farming/Agriculture,Farming/Agriculture,Consumo,False
+damodaran,Financial Svcs. (Non-bank & Insurance),Financial Svcs. (Non-bank & Insurance),Financiero,False
+damodaran,Food Processing,Food Processing,Consumo,False
+damodaran,Food Wholesalers,Food Wholesalers,Consumo,False
+damodaran,Furn/Home Furnishings,Furn/Home Furnishings,Consumo,False
+damodaran,Green & Renewable Energy,Green & Renewable Energy,Energía y materiales,False
+damodaran,Healthcare Products,Healthcare Products,Salud,False
+damodaran,Healthcare Support Services,Healthcare Support Services,Salud,False
+damodaran,Heathcare Information and Technology,Healthcare Information and Technology,Salud,False
+damodaran,Homebuilding,Homebuilding,Inmobiliario,False
+damodaran,Hospitals/Healthcare Facilities,Hospitals/Healthcare Facilities,Salud,False
+damodaran,Hotel/Gaming,Hotel/Gaming,Consumo,False
+damodaran,Household Products,Household Products,Consumo,False
+damodaran,Information Services,Information Services,Tecnología,False
+damodaran,Insurance (General),Insurance (General),Financiero,False
+damodaran,Insurance (Life),Insurance (Life),Financiero,False
+damodaran,Insurance (Prop/Cas.),Insurance (Prop/Cas.),Financiero,False
+damodaran,Investments & Asset Management,Investments & Asset Management,Financiero,False
+damodaran,Machinery,Machinery,Industria,False
+damodaran,Metals & Mining,Metals & Mining,Energía y materiales,False
+damodaran,Office Equipment & Services,Office Equipment & Services,Servicios,False
+damodaran,Oil/Gas (Integrated),Oil/Gas (Integrated),Energía y materiales,False
+damodaran,Oil/Gas (Production and Exploration),Oil/Gas (Production and Exploration),Energía y materiales,False
+damodaran,Oil/Gas Distribution,Oil/Gas Distribution,Energía y materiales,False
+damodaran,Oilfield Svcs/Equip.,Oilfield Svcs/Equip.,Energía y materiales,False
+damodaran,Packaging & Container,Packaging & Container,Industria,False
+damodaran,Paper/Forest Products,Paper/Forest Products,Energía y materiales,False
+damodaran,Power,Power,Servicios públicos,False
+damodaran,Precious Metals,Precious Metals,Energía y materiales,False
+damodaran,Publishing & Newspapers,Publishing & Newspapers,Medios y telecomunicaciones,False
+damodaran,R.E.I.T.,R.E.I.T.,Inmobiliario,False
+damodaran,Real Estate (Development),Real Estate (Development),Inmobiliario,False
+damodaran,Real Estate (General/Diversified),Real Estate (General/Diversified),Inmobiliario,False
+damodaran,Real Estate (Operations & Services),Real Estate (Operations & Services),Inmobiliario,False
+damodaran,Recreation,Recreation,Consumo,False
+damodaran,Reinsurance,Reinsurance,Financiero,False
+damodaran,Restaurant/Dining,Restaurant/Dining,Consumo,False
+damodaran,Retail (Automotive),Retail (Automotive),Consumo,False
+damodaran,Retail (Building Supply),Retail (Building Supply),Consumo,False
+damodaran,Retail (Distributors),Retail (Distributors),Consumo,False
+damodaran,Retail (General),Retail (General),Consumo,False
+damodaran,Retail (Grocery and Food),Retail (Grocery and Food),Consumo,False
+damodaran,Retail (REITs),Retail (REITs),Inmobiliario,False
+damodaran,Retail (Special Lines),Retail (Special Lines),Consumo,False
+damodaran,Rubber& Tires,Rubber & Tires,Consumo,False
+damodaran,Semiconductor,Semiconductor,Tecnología,False
+damodaran,Semiconductor Equip,Semiconductor Equipment,Tecnología,False
+damodaran,Shipbuilding & Marine,Shipbuilding & Marine,Industria,False
+damodaran,Shoe,Shoe,Consumo,False
+damodaran,Software (Entertainment),Software (Entertainment),Tecnología,False
+damodaran,Software (Internet),Software (Internet),Tecnología,False
+damodaran,Software (System & Application),Software (System & Application),Tecnología,False
+damodaran,Steel,Steel,Energía y materiales,False
+damodaran,Telecom (Wireless),Telecom (Wireless),Medios y telecomunicaciones,False
+damodaran,Telecom. Equipment,Telecom. Equipment,Tecnología,False
+damodaran,Telecom. Services,Telecom. Services,Medios y telecomunicaciones,False
+damodaran,Tobacco,Tobacco,Consumo,False
+damodaran,Transportation,Transportation,Transporte,False
+damodaran,Transportation (Railroads),Transportation (Railroads),Transporte,False
+damodaran,Trucking,Trucking,Transporte,False
+damodaran,Utility (General),Utility (General),Servicios públicos,False
+damodaran,Utility (Water),Utility (Water),Servicios públicos,False
+damodaran,Total Market,Total Market,Referencia,True
+damodaran,Total Market (without financials),Total Market (without financials),Referencia,True

@@ -1,0 +1,50 @@
+# Despliegue continuo: un activador de Cloud Build conectado a GitHub ejecuta este archivo
+# en cada push a main. Construye la imagen, la sube a Artifact Registry y la despliega en Cloud Run.
+substitutions:
+  _REGION: europe-southwest1
+  _SERVICE: valorador-startups
+  _REPO: valorador
+
+steps:
+  - id: tests
+    name: python:3.13-slim
+    entrypoint: sh
+    args:
+      - -c
+      - pip install -q -r requirements-dev.txt && python -m pytest -q
+
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA
+      - .
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA"]
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --session-affinity
+      - --min-instances=0
+      - --max-instances=2
+      - --memory=1Gi
+      - --cpu=1
+      - --timeout=3600
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA
+
+options:
+  logging: CLOUD_LOGGING_ONLY

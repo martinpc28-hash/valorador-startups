@@ -1,0 +1,63 @@
+metric,label_es,unit,periodicity,cap_min,cap_max,description
+n_firms,Número de empresas,count,,,,Empresas cotizadas de EE. UU. incluidas en la industria
+beta,Beta apalancada,beta,,,,Beta de regresión promedio de la industria
+de_ratio,Deuda / Equity (D/E),decimal,,0,5,Deuda a valor de mercado sobre equity
+tax_rate,Tasa de impuestos efectiva,decimal,annual,0,0.5,Impuestos pagados sobre beneficio antes de impuestos
+unlevered_beta,Beta desapalancada,beta,,,,Beta sin efecto de la deuda
+cash_to_firm_value,Efectivo / valor de la empresa,decimal,,0,1,Caja sobre valor de la empresa
+unlevered_beta_cash_adj,Beta desapalancada corregida por efectivo,beta,,0,3,Beta desapalancada eliminando el efecto de la caja (beta del negocio puro)
+hilo_risk,HiLo risk,score,,,,(Máximo − mínimo) / (máximo + mínimo) del precio en el año
+sd_equity,Desviación estándar del equity,decimal,annual,,,Volatilidad anualizada del precio de la acción
+sd_operating_income,Desviación estándar del resultado operativo (10 años),decimal,annual,,,Variabilidad del resultado operativo en los últimos 10 años
+correlation_market,Correlación con el mercado,decimal,,0,1,Correlación promedio de la acción con el índice de mercado
+total_unlevered_beta,Beta total desapalancada,beta,,0,10,Beta desapalancada / correlación con el mercado (para inversores no diversificados)
+total_levered_beta,Beta total apalancada,beta,,0,12,Beta apalancada / correlación con el mercado
+cost_of_equity,Costo del equity,decimal,annual,,,Costo del equity de la industria con la prima de riesgo de Damodaran
+equity_to_capital,E/(D+E),decimal,,0,1,Peso del equity en la estructura de capital
+cost_of_debt,Costo de la deuda (antes de impuestos),decimal,annual,,,Costo de la deuda antes de impuestos
+after_tax_cost_of_debt,Costo de la deuda después de impuestos,decimal,annual,,,Costo de la deuda después de impuestos
+debt_to_capital,D/(D+E),decimal,,0,1,Peso de la deuda en la estructura de capital
+cost_of_capital,Costo de capital (WACC),decimal,annual,0.03,0.2,Costo promedio ponderado del capital de la industria
+gross_margin,Margen bruto,decimal,annual,-1,1,Beneficio bruto sobre ventas
+net_margin,Margen neto,decimal,annual,-1,1,Beneficio neto sobre ventas
+operating_margin_pre_sbc,Margen operativo antes de compensación en acciones,decimal,annual,-1,1,Margen operativo antes de impuestos y de compensación en acciones
+operating_margin_unadj,Margen operativo (sin ajustar),decimal,annual,-1,1,Margen operativo antes de impuestos sin ajustes
+after_tax_operating_margin_unadj,Margen operativo después de impuestos (sin ajustar),decimal,annual,-1,1,Margen operativo después de impuestos sin ajustes
+operating_margin,Margen operativo (ajustado por arrendamientos),decimal,annual,-1,1,Margen operativo antes de impuestos ajustado por arrendamientos; es el que usa el DCF
+after_tax_operating_margin,Margen operativo después de impuestos (ajustado por arrendamientos),decimal,annual,-1,1,Margen operativo después de impuestos ajustado por arrendamientos
+operating_margin_lease_rd_adj,Margen operativo ajustado por arrendamientos e I+D,decimal,annual,-1,1,Margen operativo antes de impuestos capitalizando arrendamientos e I+D
+after_tax_operating_margin_lease_rd_adj,Margen operativo después de impuestos ajustado por arrendamientos e I+D,decimal,annual,-1,1,Margen operativo después de impuestos capitalizando arrendamientos e I+D
+ebitda_margin,Margen EBITDA,decimal,annual,-1,1,EBITDA sobre ventas
+ebitdasga_to_sales,EBITDA + SG&A / ventas,decimal,annual,-1,1.5,EBITDA más gastos generales sobre ventas
+ebitdard_to_sales,EBITDA + I+D / ventas,decimal,annual,-1,1.5,EBITDA más I+D sobre ventas
+cogs_to_sales,Costo de ventas / ventas,decimal,annual,0,1.5,Costo de los bienes vendidos sobre ventas
+rd_to_sales,I+D / ventas,decimal,annual,0,1,Gasto en I+D sobre ventas
+sga_to_sales,SG&A / ventas,decimal,annual,0,1.5,Gastos generales y administrativos sobre ventas
+sbc_to_sales,Compensación en acciones / ventas,decimal,annual,0,1,Compensación en acciones sobre ventas
+lease_to_sales,Arrendamientos / ventas,decimal,annual,0,1,Gasto en arrendamientos sobre ventas
+price_to_sales,Price/Sales,multiple,,0,30,Capitalización bursátil sobre ventas
+ev_sales,EV/Sales,multiple,,0,30,Valor de la empresa sobre ventas
+ev_ebitdard_pos,EV/EBITDAR&D (solo EBITDA positivo),multiple,,0,80,EV sobre EBITDA + I+D; solo empresas con EBITDA positivo
+ev_ebitda_pos,EV/EBITDA (solo EBITDA positivo),multiple,,0,80,EV sobre EBITDA; solo empresas con EBITDA positivo
+ev_ebit_pos,EV/EBIT (solo EBITDA positivo),multiple,,0,150,EV sobre EBIT; solo empresas con EBITDA positivo
+ev_ebit_after_tax_pos,EV/EBIT(1-t) (solo EBITDA positivo),multiple,,0,200,EV sobre EBIT después de impuestos; solo empresas con EBITDA positivo
+ev_ebitdard_all,EV/EBITDAR&D (todas las empresas),multiple,,0,80,EV sobre EBITDA + I+D; todas las empresas
+ev_ebitda_all,EV/EBITDA (todas las empresas),multiple,,0,80,EV sobre EBITDA; todas las empresas
+ev_ebit_all,EV/EBIT (todas las empresas),multiple,,0,150,EV sobre EBIT; todas las empresas
+ev_ebit_after_tax_all,EV/EBIT(1-t) (todas las empresas),multiple,,0,200,EV sobre EBIT después de impuestos; todas las empresas
+cagr_net_income_5y,CAGR beneficio neto (5 años),decimal,annual,-0.5,0.6,Crecimiento anual compuesto del beneficio neto en los últimos 5 años
+cagr_revenue_5y,CAGR ingresos (5 años),decimal,annual,-0.5,0.6,Crecimiento anual compuesto de los ingresos en los últimos 5 años
+exp_revenue_growth_2y,Crecimiento esperado de ingresos (2 años),decimal,annual,-0.5,0.6,Crecimiento anual esperado de ingresos según analistas para los próximos 2 años
+exp_revenue_growth_5y,Crecimiento esperado de ingresos (5 años),decimal,annual,-0.5,0.6,Crecimiento anual esperado de ingresos según analistas para los próximos 5 años
+exp_eps_growth_5y,Crecimiento esperado del BPA (5 años),decimal,annual,-0.5,0.6,Crecimiento anual esperado del beneficio por acción para los próximos 5 años
+roc,Retorno sobre el capital (ROC),decimal,annual,-0.5,0.6,EBIT después de impuestos sobre capital invertido
+reinvestment_rate,Tasa de reinversión,decimal,annual,-1,1.5,(Capex neto + cambio en capital de trabajo) / EBIT después de impuestos
+fundamental_ebit_growth,Crecimiento fundamental del EBIT,decimal,annual,-0.5,0.6,ROC × tasa de reinversión
+capex_usd_m,Capex,usd_millions,annual,,,Inversión en capital agregada de la industria (millones de USD)
+da_usd_m,Depreciación y amortización,usd_millions,annual,,,Depreciación y amortización agregada (millones de USD)
+capex_to_da,Capex / depreciación,decimal,annual,,,Capex sobre depreciación y amortización
+acquisitions_usd_m,Adquisiciones,usd_millions,annual,,,Adquisiciones agregadas (millones de USD)
+net_rd_usd_m,I+D neto,usd_millions,annual,,,I+D neto capitalizado (millones de USD)
+net_capex_to_sales,Capex neto / ventas,decimal,annual,-1,1,Capex neto sobre ventas
+net_capex_to_ebit_after_tax,Capex neto / EBIT(1-t),decimal,annual,-2,3,Capex neto sobre EBIT después de impuestos
+sales_to_capital,Ventas / capital invertido,multiple,annual,0.2,6,Ventas sobre capital invertido (últimos 12 meses); el DCF lo usa para calcular la reinversión

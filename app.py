@@ -1,0 +1,711 @@
+"""Valorador de startups con múltiples fuentes de datos (Streamlit).
+
+Ejecutar:  streamlit run app.py
+"""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+from src import charts as ch
+from src.charts import fmt_money, fmt_mult, fmt_num, fmt_pct
+from src.data import (
+    MetricResolver,
+    industry_table,
+    latest_fx,
+    latest_series,
+    load_crosswalk,
+    load_fx,
+    load_industry_metrics,
+    load_market_metrics,
+    load_metric_definitions,
+    load_size_metrics,
+    load_sources,
+    load_stage_assumptions,
+)
+from src.montecarlo import MCSettings, simulate
+from src.valuation import (
+    DEFAULT_SCENARIOS,
+    DCFInputs,
+    ScenarioFactors,
+    dcf,
+    deal_returns,
+    discount_rate,
+    exit_ebitda_margin,
+    implied_dilution,
+    monthly_cash_projection,
+    multiple_value,
+    relever_beta,
+    resolve_round,
+    runway_months,
+    scale_margin,
+    scenario_inputs,
+    vc_method,
+    wacc,
+)
+
+st.set_page_config(page_title="Valorador de Startups", page_icon="📈", layout="wide")
+
+
+# ======================================================================= datos
+
+
+@st.cache_data(show_spinner=False)
+def load_data() -> dict:
+    metrics = load_industry_metrics()
+    crosswalk = load_crosswalk()
+    return {
+        "metrics": metrics,
+        "defs": load_metric_definitions(),
+        "crosswalk": crosswalk,
+        "industries": industry_table(crosswalk),
+        "sources": load_sources(),
+        "stages": load_stage_assumptions(),
+        "size": load_size_metrics(),
+        "market": load_market_metrics(),
+        "fx": load_fx(),
+    }
+
+
+D = load_data()
+industries = D["industries"]
+sector_of = dict(zip(industries["industry_std"], industries["sector"]))
+stages = D["stages"]
+source_names = dict(zip(D["sources"]["source_id"], D["sources"]["name"]))
+
+us_rf = latest_series(D["market"], "us_tbond_10y")
+ea_rf = latest_series(D["market"], "ea_aaa_10y")
+erp_row = latest_series(D["market"], "implied_erp_fcfe")
+fx_row = latest_fx(D["fx"])
+
+
+def pct_input(label: str, value: float, key: str, min_value: float = -100.0, max_value: float = 500.0,
+              step: float = 0.5, help: str | None = None) -> float:
+    """Entrada en porcentaje que devuelve un decimal."""
+    return st.number_input(label, min_value, max_value, float(round(value * 100, 2)), step,
+                           format="%.2f", key=key, help=help) / 100.0
+
+
+def money_input(label: str, value: float, key: str, help: str | None = None, min_value: float = 0.0) -> float:
+    return st.number_input(label, min_value, None, float(value), 50_000.0, format="%.0f", key=key, help=help)
+
+
+# ======================================================================= barra lateral
+
+with st.sidebar:
+    st.title("Valorador de Startups")
+    currency = st.radio("Moneda base", ["USD", "EUR"], horizontal=True,
+                        help="Los importes se introducen y se muestran en esta moneda.")
+    sym = ch.CURRENCY_SYMBOL[currency]
+
+    options = industries["industry_std"].tolist()
+    industry = st.selectbox(
+        "Industria", options, index=options.index("Software (System & Application)"),
+        format_func=lambda i: f"{i} · {sector_of[i]}",
+        help="Taxonomía propia (industry_std) con equivalencias desde la clasificación de cada fuente.",
+    )
+    stage_label = st.selectbox("Etapa", stages["stage_label"].tolist(), index=1)
+
+    with st.expander("Fuentes de datos"):
+        available = list(dict.fromkeys(D["metrics"]["source"]))
+        priority = st.multiselect(
+            "Orden de prioridad", available, default=available,
+            format_func=lambda s: source_names.get(s, s),
+            help="La primera es la fuente por defecto. Si le falta una métrica se usa la siguiente y se avisa.",
+        )
+        apply_caps = st.checkbox("Recortar valores extremos (topes en metric_definitions.csv)", True)
+
+    st.subheader("Empresa")
+    revenue0 = money_input(f"Ingresos últimos 12 meses ({sym})", 1_500_000, "rev0")
+    growth = pct_input("Crecimiento anual de ingresos (%)", 0.80, "growth",
+                       help="Se mantiene durante los años de alto crecimiento y luego converge a la tasa estable.")
+    hg_years = st.slider("Años de alto crecimiento", 1, 9, 5)
+    current_margin = pct_input("Margen operativo actual (%)", -0.60, "cm", min_value=-1000.0, max_value=90.0)
+    burn = money_input(f"Burn rate mensual ({sym})", 150_000, "burn")
+    cash = money_input(f"Caja disponible ({sym})", 1_200_000, "cash")
+
+    st.subheader("Ronda")
+    solve_for = st.radio("Calcular", ["Participación", "Pre-money", "Inversión"], horizontal=True,
+                         help="Participación = inversión / (pre-money + inversión). Introduce dos y se calcula la tercera.")
+    inv_in = money_input(f"Inversión ({sym})", 3_000_000, "inv") if solve_for != "Inversión" else None
+    pre_in = money_input(f"Pre-money propuesta ({sym})", 12_000_000, "pre") if solve_for != "Pre-money" else None
+    stake_in = pct_input("Participación buscada (%)", 0.20, "stake", 0.1, 99.0) if solve_for != "Participación" else None
+    terms = resolve_round(inv_in, pre_in, stake_in)
+    st.caption(
+        f"Inversión {fmt_money(terms.investment, currency)} · pre-money {fmt_money(terms.pre_money, currency)} · "
+        f"post-money {fmt_money(terms.post_money, currency)} · participación {fmt_pct(terms.stake)}"
+    )
+
+    st.subheader("Salida")
+    exit_year = st.slider("Año de salida", 2, 10, 6)
+    exit_basis = st.radio("Múltiplo de salida", ["EV/Sales", "EV/EBITDA"], horizontal=True)
+
+    st.subheader("Tasas y primas")
+    beta_type = st.radio("Beta", ["Total", "De mercado"], horizontal=True,
+                         help="Beta total = beta de mercado / correlación. Supone un inversor no diversificado (fundador, VC concentrado).")
+    rf_default = (us_rf["value"] if currency == "USD" else ea_rf["value"])
+    rf = pct_input("Tasa libre de riesgo (%)", rf_default, f"rf_{currency}", 0.0, 20.0, 0.05,
+                   help=("Bono del Tesoro a 10 años según Damodaran (histimpl)" if currency == "USD"
+                         else "Curva AAA de la zona euro a 10 años (BCE)"))
+    erp = pct_input("Prima de riesgo del mercado (%)", erp_row["value"], "erp", 0.0, 20.0, 0.05,
+                    help=f"Prima implícita de EE. UU. de Damodaran al {erp_row['date']}.")
+    stage_row0 = stages[stages["stage_label"] == stage_label].iloc[0]
+    size_prem = pct_input("Prima por tamaño (%)", 0.0, "size", 0.0, 20.0, 0.25)
+    illiq_prem = pct_input("Prima por iliquidez (%)", stage_row0["illiquidity_premium"], f"illiq_{stage_label}", 0.0, 20.0, 0.25,
+                           help="Por defecto, el supuesto de la etapa.")
+    with st.expander("Estructura de capital e impuestos"):
+        de_ratio = pct_input("D/E de la startup (%)", 0.0, "de", 0.0, 500.0, 5.0)
+        kd = pct_input("Costo de la deuda antes de impuestos (%)", 0.08, "kd", 0.0, 40.0, 0.25)
+        tax = pct_input("Tasa marginal de impuestos (%)", 0.25, "tax", 0.0, 60.0, 0.5)
+        nol0 = money_input(f"Pérdidas fiscales acumuladas ({sym})", 0, "nol")
+        debt = money_input(f"Deuda financiera ({sym})", 0, "debt")
+
+    st.subheader("Método VC")
+    vc_mode_label = st.radio(
+        "Tratamiento del riesgo de fracaso",
+        ["IRR objetivo (ya incluye el fracaso)", "Costo del equity × supervivencia"],
+        help="Nunca se aplican las dos cosas a la vez: sería contar el fracaso dos veces.",
+    )
+    vc_mode = "irr" if vc_mode_label.startswith("IRR") else "survival"
+
+
+# ======================================================================= pestañas (controles primero)
+
+st.title("Valorador de Startups")
+st.caption(f"{industry} · {sector_of[industry]} · etapa {stage_label} · moneda {currency}")
+warn_box = st.container()
+
+tab_names = ["Resumen", "DCF", "Método VC", "Múltiplos", "Escenarios", "Monte Carlo", "Caja y ronda", "Supuestos", "Datos y fuentes"]
+T = dict(zip(tab_names, st.tabs(tab_names)))
+
+with T["Supuestos"]:
+    st.subheader("Supuestos por etapa")
+    st.info(
+        "Supuestos **ilustrativos** del autor, editables. Se sustituirán por una fuente verificada con datos por "
+        "etapa cuando se integre (ver `data/sources.csv`). Los cambios afectan a todos los cálculos."
+    )
+    stage_cols = ["stage_label", "target_irr", "survival_prob", "future_dilution", "illiquidity_premium", "illiquidity_discount"]
+    edited = st.data_editor(
+        stages[stage_cols], key="stage_editor", hide_index=True, disabled=["stage_label"], width="stretch",
+        column_config={
+            "stage_label": "Etapa",
+            "target_irr": st.column_config.NumberColumn("IRR objetivo", format="percent", min_value=0.0, max_value=2.0),
+            "survival_prob": st.column_config.NumberColumn("Prob. de supervivencia", format="percent", min_value=0.01, max_value=1.0),
+            "future_dilution": st.column_config.NumberColumn("Dilución futura", format="percent", min_value=0.0, max_value=0.95),
+            "illiquidity_premium": st.column_config.NumberColumn("Prima de iliquidez", format="percent", min_value=0.0, max_value=0.3),
+            "illiquidity_discount": st.column_config.NumberColumn("Descuento por iliquidez (múltiplos)", format="percent", min_value=0.0, max_value=0.9),
+        },
+    )
+    st.caption("Fuente: supuesto propio (`data/stage_assumptions.csv`).")
+
+stage = edited[edited["stage_label"] == stage_label].iloc[0]
+
+with T["Escenarios"]:
+    st.subheader("Factores por escenario")
+    st.caption("Multiplican el crecimiento, el margen objetivo (mejora o empeora) y el múltiplo de salida del caso base.")
+    sc_df = st.data_editor(
+        pd.DataFrame([vars(s) for s in DEFAULT_SCENARIOS]), key="scenario_editor", hide_index=True,
+        disabled=["name"], width="stretch",
+        column_config={
+            "name": "Escenario",
+            "growth": st.column_config.NumberColumn("Crecimiento ×", min_value=0.0, max_value=5.0, step=0.05),
+            "margin": st.column_config.NumberColumn("Margen ×", min_value=0.0, max_value=2.0, step=0.05),
+            "multiple": st.column_config.NumberColumn("Múltiplo ×", min_value=0.0, max_value=5.0, step=0.05),
+        },
+    )
+    scenarios = [ScenarioFactors(r.name, r.growth, r.margin, r.multiple) for r in sc_df.itertuples()]
+
+with T["Monte Carlo"]:
+    st.subheader("Supuestos de la simulación")
+    c1, c2, c3, c4 = st.columns(4)
+    mc = MCSettings(
+        growth_sd=c1.number_input("Desv. del crecimiento (pp)", 0.0, 200.0, 20.0, 1.0) / 100,
+        margin_sd=c2.number_input("Desv. del margen objetivo (pp)", 0.0, 50.0, 5.0, 0.5) / 100,
+        multiple_sd=c3.number_input("Desv. del log del múltiplo", 0.0, 2.0, 0.35, 0.05),
+        moic_target=c4.number_input("MOIC objetivo", 0.5, 100.0, 3.0, 0.5),
+    )
+    c5, c6, c7, c8 = st.columns(4)
+    mc.corr_growth_margin = c5.number_input("Correlación crecimiento–margen", -0.95, 0.95, -0.2, 0.05)
+    mc.corr_growth_multiple = c6.number_input("Correlación crecimiento–múltiplo", -0.95, 0.95, 0.5, 0.05)
+    mc.corr_margin_multiple = c7.number_input("Correlación margen–múltiplo", -0.95, 0.95, 0.2, 0.05)
+    mc.include_failure = c8.checkbox("Incluir fracaso (supervivencia)", True)
+    st.caption(f"{mc.n_sims:,} simulaciones con semilla fija {mc.seed}: el resultado es reproducible.".replace(",", "."))
+
+with T["Caja y ronda"]:
+    cc1, cc2 = st.columns(2)
+    cost_growth = cc1.number_input("Crecimiento anual de los costos (%)", -50.0, 500.0, 30.0, 5.0) / 100
+    add_round = cc2.checkbox("Sumar la inversión de esta ronda a la caja", True)
+
+# ======================================================================= resolución de datos
+
+resolver = MetricResolver(D["metrics"], D["defs"], priority or None, apply_caps)
+R = {m: resolver.get(industry, m) for m in [
+    "unlevered_beta_cash_adj", "correlation_market", "operating_margin", "operating_margin_unadj",
+    "ebitda_margin", "sales_to_capital", "cost_of_capital", "roc", "de_ratio", "tax_rate", "cost_of_debt",
+    "ev_sales", "ev_ebitda_pos", "ev_ebitda_all", "n_firms",
+]}
+critical = ["unlevered_beta_cash_adj", "correlation_market", "operating_margin", "sales_to_capital", "ev_sales"]
+missing = [R[m].label for m in critical if not R[m].ok]
+if missing:
+    st.error(f"Faltan datos imprescindibles para {industry}: {', '.join(missing)}. Elige otra industria u otra fuente.")
+    st.stop()
+
+# Valores de industria que el usuario puede sustituir
+with st.sidebar:
+    st.subheader("Supuestos anclados en la industria")
+    target_margin = pct_input("Margen operativo objetivo (%)", R["operating_margin"].value, f"tm_{industry}_{apply_caps}",
+                              -100.0, 90.0, help="Por defecto, margen operativo de la industria.\n\n" + R["operating_margin"].provenance())
+    margin_year = st.slider("Año en que se alcanza el margen objetivo", 2, 10, 7)
+    s2c = st.number_input("Ventas / capital invertido", 0.05, 20.0, float(round(R["sales_to_capital"].value, 2)), 0.05,
+                          key=f"s2c_{industry}_{apply_caps}", help=R["sales_to_capital"].provenance())
+    mult_res = R["ev_sales"] if exit_basis == "EV/Sales" else R["ev_ebitda_pos"]
+    exit_multiple = st.number_input(f"Múltiplo de salida {exit_basis}", 0.1, 200.0, float(round(mult_res.value, 2)), 0.1,
+                                    key=f"mult_{industry}_{exit_basis}_{apply_caps}",
+                                    help="Por defecto, múltiplo de la industria" + (" (solo empresas con EBITDA positivo)" if exit_basis == "EV/EBITDA" else "")
+                                    + ".\n\n" + mult_res.provenance())
+    stable_growth = pct_input("Crecimiento estable perpetuo (%)", min(0.03, rf), "g_stable", -5.0, 10.0, 0.25,
+                              help="Se limita a la tasa libre de riesgo.")
+    distress = pct_input("Recuperación si fracasa (% del valor operativo)", 0.0, "distress", 0.0, 100.0, 5.0)
+
+# ======================================================================= cálculos
+
+use_total = beta_type == "Total"
+dr = discount_rate(R["unlevered_beta_cash_adj"].value, R["correlation_market"].value, use_total, rf, erp,
+                   size_prem, illiq_prem, de_ratio, tax, kd)
+ind_de = R["de_ratio"].value if R["de_ratio"].ok else 0.0
+ind_kd = R["cost_of_debt"].value if R["cost_of_debt"].ok else kd
+mature_beta = relever_beta(R["unlevered_beta_cash_adj"].value, ind_de, tax)
+mature_coc = wacc(rf + mature_beta * erp, ind_kd, tax, ind_de)
+terminal_roc = R["roc"].value if R["roc"].ok else mature_coc
+
+base = DCFInputs(
+    revenue0=revenue0, growth_high=growth, stable_growth=stable_growth, current_margin=current_margin,
+    target_margin=target_margin, margin_year=margin_year, tax_rate=tax, sales_to_capital=s2c,
+    cost_of_capital=dr.cost_of_capital, mature_cost_of_capital=mature_coc, terminal_roc=terminal_roc,
+    risk_free=rf, survival_prob=float(stage["survival_prob"]), distress_proceeds=distress, nol0=nol0,
+    cash=cash, debt=debt, years=10, high_growth_years=hg_years,
+)
+dcf_res = dcf(base)
+proj = dcf_res.projection
+
+da_margin = max((R["ebitda_margin"].value if R["ebitda_margin"].ok else 0) - (R["operating_margin_unadj"].value if R["operating_margin_unadj"].ok else 0), 0.0)
+
+
+def exit_metric(projection: pd.DataFrame, basis: str) -> tuple[float, float]:
+    """(ingresos, EBITDA) en el año de salida."""
+    row = projection.iloc[min(exit_year, len(projection)) - 1]
+    ebitda = row["Ingresos"] * (row["Margen operativo"] + da_margin)
+    return row["Ingresos"], ebitda
+
+
+def vc_for(projection: pd.DataFrame, multiple: float):
+    rev_exit, ebitda_exit = exit_metric(projection, exit_basis)
+    base_metric = rev_exit if exit_basis == "EV/Sales" else ebitda_exit
+    ev_exit = base_metric * multiple if base_metric > 0 else math.nan
+    rate = float(stage["target_irr"]) if vc_mode == "irr" else dr.cost_of_equity
+    res = vc_method(ev_exit, exit_year, terms.investment, rate, float(stage["future_dilution"]),
+                    float(stage["survival_prob"]), vc_mode)
+    return res, rev_exit, ebitda_exit
+
+
+vc_res, rev_exit, ebitda_exit = vc_for(proj, exit_multiple)
+deal = deal_returns(vc_res.exit_value, exit_year, terms, float(stage["future_dilution"]), float(stage["survival_prob"]))
+
+# Múltiplos actuales
+illiq_disc = float(stage["illiquidity_discount"])
+ebitda_now = revenue0 * (current_margin + da_margin)
+rev_fwd = revenue0 * (1 + growth)
+size = D["size"]
+size_val = lambda cls, m: size[(size.size_class == cls) & (size.metric == m)]["value"].iloc[0]  # noqa: E731
+size_url = size[size.metric == "ev_sales"]["url"].iloc[0]
+mult_rows = [
+    ("EV/Sales industria (trailing)", R["ev_sales"].value, revenue0, "Ingresos 12 m", R["ev_sales"]),
+    ("EV/Sales industria (forward, descontado 1 año)", R["ev_sales"].value / (1 + dr.cost_of_equity), rev_fwd, "Ingresos próximos 12 m", R["ev_sales"]),
+    ("EV/EBITDA industria (EBITDA positivo)", R["ev_ebitda_pos"].value, ebitda_now, "EBITDA 12 m", R["ev_ebitda_pos"]),
+    ("EV/EBITDA industria (todas)", R["ev_ebitda_all"].value, ebitda_now, "EBITDA 12 m", R["ev_ebitda_all"]),
+    ("EV/Sales decil de menor capitalización (EE. UU.)", size_val("Bottom decile", "ev_sales"), revenue0, "Ingresos 12 m", None),
+    ("EV/Sales todas las cotizadas (EE. UU.)", size_val("All firms", "ev_sales"), revenue0, "Ingresos 12 m", None),
+]
+mult_table = []
+for name, m, base_metric, metric_name, res in mult_rows:
+    ev = multiple_value(base_metric, m, illiq_disc)
+    eq = ev + cash - debt if not math.isnan(ev) else math.nan
+    mult_table.append({
+        "Método": name, "Múltiplo": m, "Métrica": metric_name, "Valor de la métrica": base_metric,
+        "Valor del equity": eq,
+        "Fuente": (f"{res.source} · {res.industry_used} · {res.as_of}" if res else f"damodaran · mktcapmult · {size['as_of'].iloc[0]}"),
+        "URL": res.url if res else size_url,
+    })
+mult_df = pd.DataFrame(mult_table)
+valid_mult = mult_df["Valor del equity"].dropna()
+
+# Escenarios
+sc_rows = []
+for f in scenarios:
+    inp = scenario_inputs(base, f)
+    r = dcf(inp)
+    v, _, _ = vc_for(r.projection, exit_multiple * f.multiple)
+    m_val = multiple_value(revenue0, R["ev_sales"].value * f.multiple, illiq_disc) + cash - debt
+    sc_rows.append({"Escenario": f.name, "DCF": r.equity_value, "Método VC (pre-money)": v.pre_money,
+                    "Múltiplos (EV/Sales)": m_val, "Ingresos año de salida": r.projection.iloc[exit_year - 1]["Ingresos"],
+                    "Margen objetivo": inp.target_margin, "Crecimiento": inp.growth_high})
+sc_res = pd.DataFrame(sc_rows)
+
+# Monte Carlo
+mc_multiple = exit_multiple if exit_basis == "EV/Sales" else R["ev_sales"].value
+mc_res = simulate(base, mc_multiple, exit_year, terms.investment, terms.stake, float(stage["future_dilution"]), mc)
+
+
+def sc_value(name: str, col: str) -> float:
+    s = sc_res[sc_res["Escenario"] == name][col]
+    return float(s.iloc[0]) if not s.empty else math.nan
+
+
+# Rango por método
+ff_rows = [
+    {"method": "DCF", "low": sc_res["DCF"].min(), "high": sc_res["DCF"].max(), "mid": dcf_res.equity_value,
+     "range_label": "Escenarios"},
+    {"method": "Método VC", "low": sc_res["Método VC (pre-money)"].min(), "high": sc_res["Método VC (pre-money)"].max(),
+     "mid": vc_res.pre_money, "range_label": "Escenarios"},
+]
+if not valid_mult.empty:
+    ff_rows.append({"method": "Múltiplos", "low": valid_mult.min(), "high": valid_mult.max(),
+                    "mid": float(mult_df["Valor del equity"].iloc[0]), "range_label": "Mín–máx"})
+p = mc_res.percentiles["Valor DCF"]
+# Central = media: con fracaso incluido la mediana puede caer en un escenario de quiebra,
+# y la media es la magnitud comparable con el DCF (valor esperado).
+ff_rows.append({"method": "Monte Carlo (DCF)", "low": p["P10"], "high": p["P90"], "mid": p["Media"], "range_label": "P10–P90"})
+ff_rows = [r for r in ff_rows if not any(math.isnan(r[k]) for k in ("low", "high", "mid"))]
+
+mids = [r["mid"] for r in ff_rows]
+lo_mid, hi_mid = min(mids), max(mids)
+if terms.pre_money < lo_mid:
+    verdict = ("Por debajo del rango de valoraciones", "La pre-money propuesta es menor que el valor central de todos los métodos.", "good")
+elif terms.pre_money > hi_mid:
+    verdict = ("Por encima del rango de valoraciones", "La pre-money propuesta supera el valor central de todos los métodos.", "critical")
+else:
+    verdict = ("Dentro del rango de valoraciones", "La pre-money propuesta está entre los valores centrales de los métodos.", "warning")
+
+# Caja
+runway = runway_months(cash, burn)
+cash_proj = monthly_cash_projection(cash, revenue0, burn, growth, cost_growth, 48, terms.investment if add_round else 0.0)
+funding_gap = max(dcf_res.capital_need - cash - terms.investment, 0.0)
+dil_implied = implied_dilution(funding_gap, terms.post_money)
+
+# ======================================================================= avisos
+
+warnings = []
+for res in resolver.used.values():
+    warnings += res.warnings()
+warnings += dcf_res.warnings
+if exit_basis == "EV/EBITDA" and not (ebitda_exit > 0):
+    warnings.append("El EBITDA proyectado en el año de salida no es positivo: el método VC por EV/EBITDA no aplica. Usa EV/Sales.")
+with warn_box:
+    if warnings:
+        with st.expander(f"⚠️ Avisos sobre los datos ({len(warnings)})", expanded=False):
+            for w in dict.fromkeys(warnings):
+                st.markdown(f"- {w}")
+
+
+def metric(col, label: str, value: str, res=None, help: str | None = None, delta: str | None = None):
+    """Tarjeta con la procedencia en el tooltip. La moneda pasa a la etiqueta para que el valor quepa."""
+    h = res.provenance() if res is not None else help
+    if value.startswith(sym + " "):
+        value, label = value[len(sym) + 1:], f"{label} ({sym})"
+    col.metric(label, value, help=h)
+    if delta:  # comparación como texto: la flecha de st.metric sugiere una variación que no existe
+        col.caption(delta)
+
+
+# ======================================================================= Resumen
+
+with T["Resumen"]:
+    icon = {"good": "🟢", "warning": "🟡", "critical": "🔴"}[verdict[2]]
+    st.subheader(f"{icon} {verdict[0]}")
+    st.caption(verdict[1] + " Comparación con la pre-money propuesta; no es una recomendación de inversión.")
+    c = st.columns(5)
+    metric(c[0], "Pre-money propuesta", fmt_money(terms.pre_money, currency),
+           help=f"Post-money {fmt_money(terms.post_money, currency)}; participación {fmt_pct(terms.stake)}")
+    metric(c[1], "DCF (equity)", fmt_money(dcf_res.equity_value, currency),
+           help="Valor esperado con probabilidad de supervivencia, más caja y menos deuda.")
+    metric(c[2], "Método VC (pre-money)", fmt_money(vc_res.pre_money, currency),
+           help=f"Salida {fmt_money(vc_res.exit_value, currency)} en el año {exit_year}, descontada a {fmt_pct(vc_res.discount_rate)}.")
+    metric(c[3], "MOIC si hay salida", fmt_mult(deal.moic),
+           help=f"Esperado con supervivencia ({fmt_pct(stage['survival_prob'])}): {fmt_mult(deal.expected_moic)}")
+    metric(c[4], "Runway", f"{fmt_num(runway, 1)} meses", help="Caja disponible / burn rate mensual (sin la ronda).")
+
+    st.plotly_chart(ch.football_field(ff_rows, terms.pre_money, currency), width="stretch")
+    st.dataframe(pd.DataFrame([{
+        "Método": r["method"], "Bajo": fmt_money(r["low"], currency), "Central": fmt_money(r["mid"], currency),
+        "Alto": fmt_money(r["high"], currency), "Rango": r["range_label"],
+    } for r in ff_rows]), hide_index=True, width="stretch")
+
+    other = "EUR" if currency == "USD" else "USD"
+    if fx_row is not None:
+        rate = fx_row["rate"] if currency == "EUR" else 1 / fx_row["rate"]
+        st.caption(
+            f"Pre-money propuesta en {other}: {fmt_money(terms.pre_money * rate, other)} "
+            f"(tipo de referencia BCE {fmt_num(fx_row['rate'], 4)} USD/EUR del {fx_row['date']})."
+        )
+
+# ======================================================================= DCF
+
+with T["DCF"]:
+    st.subheader("Costo de capital")
+    c = st.columns(5)
+    metric(c[0], "Beta desapalancada (industria)", fmt_num(R["unlevered_beta_cash_adj"].value, 2), R["unlevered_beta_cash_adj"])
+    metric(c[1], "Correlación con el mercado", fmt_pct(R["correlation_market"].value), R["correlation_market"])
+    metric(c[2], f"Beta usada ({dr.beta_type})", fmt_num(dr.beta_used, 2),
+           help="Beta desapalancada corregida por efectivo" + (" / correlación" if use_total else "")
+           + f", reapalancada con D/E {fmt_pct(de_ratio)}.")
+    metric(c[3], "Costo del equity", fmt_pct(dr.cost_of_equity),
+           help=f"{fmt_pct(rf)} + {fmt_num(dr.beta_used, 2)} × {fmt_pct(erp)} + {fmt_pct(size_prem + illiq_prem)} de primas")
+    metric(c[4], "Tasa madura (año 10)", fmt_pct(mature_coc),
+           help="WACC con beta de mercado y D/E de la industria: hacia ella converge la tasa de descuento.")
+
+    st.subheader("Valor")
+    c = st.columns(5)
+    metric(c[0], "VP de los flujos (10 años)", fmt_money(dcf_res.pv_fcff, currency))
+    metric(c[1], "VP del valor terminal", fmt_money(dcf_res.pv_terminal, currency),
+           help=f"Crecimiento estable {fmt_pct(dcf_res.stable_growth_used)}; ROC terminal {fmt_pct(terminal_roc)}")
+    metric(c[2], "Valor operativo en marcha", fmt_money(dcf_res.operating_value, currency))
+    metric(c[3], "Ajustado por supervivencia", fmt_money(dcf_res.survival_adjusted_value, currency),
+           help=f"Probabilidad de supervivencia {fmt_pct(base.survival_prob)} (supuesto de etapa)")
+    metric(c[4], "Valor del equity", fmt_money(dcf_res.equity_value, currency), help="Más caja, menos deuda")
+
+    g1, g2 = st.columns(2)
+    sc, unit = ch.money_scale(proj["Ingresos"])
+    g1.plotly_chart(ch.bars(proj["Año"], proj["Ingresos"] / sc, "Ingresos proyectados", f"{unit} {sym}"), width="stretch")
+    g2.plotly_chart(ch.line(proj["Año"], proj["Margen operativo"], "Margen operativo", "%", pct=True,
+                            ref=R["operating_margin"].value, ref_label="Industria"), width="stretch")
+    g3, g4 = st.columns(2)
+    sc2, unit2 = ch.money_scale(proj["FCFF"])
+    g3.plotly_chart(ch.bars(proj["Año"], proj["FCFF"] / sc2, "Flujo de caja libre (FCFF)", f"{unit2} {sym}", signed=True), width="stretch")
+    g4.plotly_chart(ch.line(proj["Año"], proj["Tasa de descuento"], "Tasa de descuento", "%", pct=True), width="stretch")
+
+    with st.expander("Tabla de proyección"):
+        fmt = proj.copy()
+        for col in ["Ingresos", "EBIT", "Impuestos", "Reinversión", "FCFF", "VP del FCFF"]:
+            fmt[col] = fmt[col].map(lambda v: fmt_money(v, currency))
+        for col in ["Crecimiento", "Margen operativo", "Tasa de descuento"]:
+            fmt[col] = fmt[col].map(fmt_pct)
+        fmt["Factor de descuento"] = fmt["Factor de descuento"].map(lambda v: fmt_num(v, 3))
+        st.dataframe(fmt, hide_index=True, width="stretch")
+
+    st.subheader("Sensibilidad")
+    s1, s2 = st.columns(2)
+    deltas = [-0.04, -0.02, 0.0, 0.02, 0.04]
+    gs = sorted({g for g in [0.0, 0.01, 0.02, 0.03, rf] if g <= rf})
+    z = np.array([[dcf(DCFInputs(**{**vars(base), "cost_of_capital": base.cost_of_capital + d, "stable_growth": g})).equity_value
+                   for d in deltas] for g in gs])
+    zs, zu = ch.money_scale(z.ravel())
+    s1.plotly_chart(ch.heatmap(z / zs, [fmt_pct(base.cost_of_capital + d) for d in deltas], [fmt_pct(g) for g in gs],
+                               "Equity según tasa de descuento y crecimiento estable", "Tasa de descuento inicial",
+                               "Crecimiento estable", f"{zu} {sym}"), width="stretch")
+
+    def eq_with(**kw) -> float:
+        return dcf(DCFInputs(**{**vars(base), **kw})).equity_value
+
+    tor = pd.DataFrame([
+        {"variable": "Crecimiento ±30 %", "low": eq_with(growth_high=growth * 0.7), "high": eq_with(growth_high=growth * 1.3)},
+        {"variable": "Margen objetivo ±5 pp", "low": eq_with(target_margin=target_margin - 0.05), "high": eq_with(target_margin=target_margin + 0.05)},
+        {"variable": "Tasa de descuento ∓2 pp", "low": eq_with(cost_of_capital=base.cost_of_capital + 0.02), "high": eq_with(cost_of_capital=max(base.cost_of_capital - 0.02, 0.01))},
+        {"variable": "Ventas/capital ±30 %", "low": eq_with(sales_to_capital=s2c * 0.7), "high": eq_with(sales_to_capital=s2c * 1.3)},
+        {"variable": "Supervivencia ±10 pp", "low": eq_with(survival_prob=max(base.survival_prob - 0.1, 0.01)), "high": eq_with(survival_prob=min(base.survival_prob + 0.1, 1.0))},
+        {"variable": "Año del margen ±2", "low": eq_with(margin_year=min(margin_year + 2, 10)), "high": eq_with(margin_year=max(margin_year - 2, 1))},
+    ])
+    ts, tu = ch.money_scale(np.r_[tor["low"], tor["high"]])
+    s2.plotly_chart(ch.tornado(tor.assign(low=tor["low"] / ts, high=tor["high"] / ts), dcf_res.equity_value / ts,
+                               "Qué variables mueven más el valor", f"{tu} {sym}"), width="stretch")
+
+# ======================================================================= Método VC
+
+with T["Método VC"]:
+    c = st.columns(4)
+    metric(c[0], f"Ingresos año {exit_year}", fmt_money(rev_exit, currency))
+    if exit_basis == "EV/EBITDA":
+        metric(c[1], f"EBITDA año {exit_year}", fmt_money(ebitda_exit, currency),
+               help=f"Margen operativo proyectado + D&A/ventas de la industria ({fmt_pct(da_margin)})")
+    metric(c[2 if exit_basis == "EV/EBITDA" else 1], f"Múltiplo {exit_basis}", fmt_mult(exit_multiple), mult_res)
+    metric(c[3 if exit_basis == "EV/EBITDA" else 2], "Valor de salida", fmt_money(vc_res.exit_value, currency))
+
+    st.markdown(
+        f"**Tratamiento del fracaso:** {vc_mode_label}. Tasa de descuento {fmt_pct(vc_res.discount_rate)}"
+        + (f" (IRR objetivo de la etapa {stage_label})" if vc_mode == "irr" else f" (costo del equity) × supervivencia {fmt_pct(vc_res.survival_prob)}")
+        + f"; dilución futura {fmt_pct(stage['future_dilution'])}."
+    )
+    st.latex(r"\text{Post-money} = \frac{\text{Valor de salida} \times (1-\text{dilución})" + (r"\times p" if vc_mode == "survival" else "")
+             + r"}{(1+r)^{T}}")
+    c = st.columns(4)
+    metric(c[0], "Post-money (método VC)", fmt_money(vc_res.post_money, currency))
+    metric(c[1], "Pre-money (método VC)", fmt_money(vc_res.pre_money, currency),
+           delta=f"Propuesta: {fmt_money(terms.pre_money, currency)}")
+    metric(c[2], "Participación necesaria hoy", fmt_pct(vc_res.required_stake),
+           delta=f"Ofrecida: {fmt_pct(terms.stake)}")
+    metric(c[3], "Participación a la salida", fmt_pct(vc_res.required_stake_at_exit))
+
+    st.subheader("Retorno con las condiciones propuestas")
+    c = st.columns(4)
+    metric(c[0], "Participación a la salida", fmt_pct(deal.stake_exit))
+    metric(c[1], "Cobro a la salida", fmt_money(deal.proceeds, currency))
+    metric(c[2], "MOIC / IRR si hay salida", f"{fmt_mult(deal.moic)} / {fmt_pct(deal.irr)}")
+    metric(c[3], "MOIC esperado (× supervivencia)", fmt_mult(deal.expected_moic),
+           help=f"Probabilidad de supervivencia {fmt_pct(stage['survival_prob'])}")
+
+# ======================================================================= Múltiplos
+
+with T["Múltiplos"]:
+    st.caption(f"Descuento por iliquidez aplicado: {fmt_pct(illiq_disc)} (supuesto de etapa, editable en «Supuestos»). "
+               "El EBITDA actual se estima como ingresos × (margen operativo + D&A/ventas de la industria).")
+    show = mult_df.copy()
+    show["Múltiplo"] = show["Múltiplo"].map(fmt_mult)
+    show["Valor de la métrica"] = show["Valor de la métrica"].map(lambda v: fmt_money(v, currency))
+    show["Valor del equity"] = show["Valor del equity"].map(
+        lambda v: fmt_money(v, currency) if not math.isnan(v) else "No aplica (métrica ≤ 0)")
+    st.dataframe(show, hide_index=True, width="stretch",
+                 column_config={"URL": st.column_config.LinkColumn("URL", display_text="fuente")})
+    if math.isnan(mult_df["Valor del equity"].iloc[2]):
+        st.info("El EBITDA actual es negativo: los múltiplos de EBITDA no aplican hoy. Es lo normal en una startup temprana; "
+                "usa EV/Sales o el EBITDA del año de salida en el método VC.")
+
+    st.subheader("Madurez: rentables frente a todas las empresas")
+    comp = pd.DataFrame({
+        "Grupo": ["Solo EBITDA positivo (maduras)", "Todas las empresas (incluye pérdidas)"],
+        "EV/EBITDA": [fmt_mult(R["ev_ebitda_pos"].value), fmt_mult(R["ev_ebitda_all"].value)],
+    })
+    st.dataframe(comp, hide_index=True)
+    st.caption("Las clases de capitalización de Damodaran (decil más pequeño) sirven como proxy de empresas jóvenes.")
+    sz = size[size.metric.isin(["ev_sales", "ev_ebitda", "operating_margin", "share_operating_loss", "total_beta"])]
+    sz = sz.pivot_table(index=["size_rank", "size_class"], columns="metric", values="value").reset_index().drop(columns="size_rank")
+    st.dataframe(sz.rename(columns={"size_class": "Clase", "ev_sales": "EV/Sales", "ev_ebitda": "EV/EBITDA",
+                                    "operating_margin": "Margen operativo (mediana)", "share_operating_loss": "% con pérdida operativa",
+                                    "total_beta": "Beta total"}),
+                 hide_index=True, width="stretch",
+                 column_config={"Margen operativo (mediana)": st.column_config.NumberColumn(format="percent"),
+                                "% con pérdida operativa": st.column_config.NumberColumn(format="percent")})
+
+# ======================================================================= Escenarios
+
+with T["Escenarios"]:
+    long = sc_res.melt(id_vars="Escenario", value_vars=["DCF", "Método VC (pre-money)", "Múltiplos (EV/Sales)"],
+                       var_name="Método", value_name="Valor")
+    st.plotly_chart(ch.scenario_bars(long, currency), width="stretch")
+    view = sc_res.copy()
+    for col in ["DCF", "Método VC (pre-money)", "Múltiplos (EV/Sales)", "Ingresos año de salida"]:
+        view[col] = view[col].map(lambda v: fmt_money(v, currency))
+    for col in ["Margen objetivo", "Crecimiento"]:
+        view[col] = view[col].map(fmt_pct)
+    st.dataframe(view, hide_index=True, width="stretch")
+
+# ======================================================================= Monte Carlo
+
+with T["Monte Carlo"]:
+    fail = 1 - mc_res.survived.mean()
+    surv = mc_res.survived if mc_res.survived.sum() >= 10 else np.ones_like(mc_res.survived)
+    pm =mc_res.percentiles.get("MOIC si hay salida", mc_res.percentiles["MOIC"])
+    pv = mc_res.percentiles.get("Valor DCF si sobrevive", mc_res.percentiles["Valor DCF"])
+    c = st.columns(5)
+    metric(c[0], "Prob. de fracaso", fmt_pct(fail), help="1 − probabilidad de supervivencia de la etapa, simulada.")
+    metric(c[1], f"Prob. de MOIC ≥ {fmt_mult(mc.moic_target, 1)}", fmt_pct(mc_res.prob_moic_target), help="Incluye los fracasos.")
+    metric(c[2], "Prob. de perder dinero", fmt_pct(mc_res.prob_loss), help="MOIC < 1x, incluidos los fracasos.")
+    metric(c[3], "MOIC medio", fmt_mult(mc_res.percentiles["MOIC"]["Media"]), help="Incluye los fracasos (MOIC 0x).")
+    metric(c[4], "MOIC P50 si hay salida", fmt_mult(pm["P50"]),
+           help=f"P10 {fmt_mult(pm['P10'])} · P90 {fmt_mult(pm['P90'])}")
+    if exit_basis == "EV/EBITDA":
+        st.caption("La simulación del valor de salida usa EV/Sales de la industria (el EBITDA de salida puede ser negativo en muchas simulaciones).")
+    st.caption("Las distribuciones muestran solo los escenarios en que la empresa sobrevive; los fracasos se resumen en las tarjetas y en la tabla.")
+    h1, h2 = st.columns(2)
+    h1.plotly_chart(ch.histogram(mc_res.moic[surv], "MOIC si hay salida", "MOIC",
+                                 {k: pm[k] for k in ("P10", "P50", "P90")}, (f"Objetivo {fmt_mult(mc.moic_target, 1)}", mc.moic_target)),
+                    width="stretch")
+    vs, vu = ch.money_scale([pv["P90"]])  # escala por P90: la cola extrema no debe fijar las unidades
+    h2.plotly_chart(ch.histogram(mc_res.dcf_equity[surv], "Equity (DCF) si sobrevive", f"{vu} {sym}",
+                                 {k: pv[k] for k in ("P10", "P50", "P90")},
+                                 ("Pre-money propuesta", terms.pre_money), scale=vs), width="stretch")
+    st.dataframe(pd.DataFrame({
+        k: {pk: (fmt_mult(v) if k.startswith("MOIC") else fmt_money(v, currency)) for pk, v in d.items()}
+        for k, d in mc_res.percentiles.items()
+    }), width="stretch")
+
+# ======================================================================= Caja y ronda
+
+with T["Caja y ronda"]:
+    c = st.columns(4)
+    metric(c[0], "Runway actual", f"{fmt_num(runway, 1)} meses")
+    metric(c[1], "Caja que consume el plan (DCF)", fmt_money(dcf_res.capital_need, currency),
+           help="Mínimo del FCFF acumulado: dinero necesario hasta que la empresa genera caja.")
+    metric(c[2], "Déficit tras caja y ronda", fmt_money(funding_gap, currency))
+    metric(c[3], "Dilución adicional implícita", fmt_pct(dil_implied),
+           help="Si el déficit se levantara hoy al post-money propuesto. Cota superior: las rondas futuras suelen tener mayor valoración. "
+                f"Compárala con la dilución futura del supuesto de etapa ({fmt_pct(stage['future_dilution'])}).")
+    st.plotly_chart(ch.cash_chart(cash_proj, currency), width="stretch")
+    out = cash_proj[cash_proj["Caja"] < 0]
+    be = cash_proj[cash_proj["Consumo de caja"] <= 0]
+    st.caption(
+        ("La caja se agota en el mes " + str(int(out["Mes"].iloc[0])) if not out.empty else "La caja no se agota en 48 meses")
+        + ("; el break-even mensual llega en el mes " + str(int(be["Mes"].iloc[0])) if not be.empty else "; no hay break-even en 48 meses")
+        + ". Las tasas anuales se convierten a mensuales con (1 + g)^(1/12) − 1."
+    )
+    st.info(
+        "La proyección mensual solo usa ingresos y costos operativos (burn rate). La caja que consume el plan del DCF "
+        "es mayor porque añade la reinversión necesaria para crecer, calculada con el ratio ventas / capital de la "
+        "industria. Si tu negocio necesita menos capital para crecer, sube ese ratio en la barra lateral."
+    )
+
+# ======================================================================= Datos y fuentes
+
+with T["Datos y fuentes"]:
+    st.subheader("Números de la industria usados en esta valoración")
+    used = pd.DataFrame([{
+        "Métrica": r.label, "Valor": r.value, "Valor original": r.raw_value, "Fuente": r.source,
+        "Industria usada": r.industry_used, "Fecha de los datos": r.as_of, "Extraído": r.retrieved_at,
+        "Avisos": " ".join(r.warnings()), "URL": r.url,
+    } for r in resolver.used.values() if not r.missing])
+    st.dataframe(used, hide_index=True, width="stretch",
+                 column_config={"URL": st.column_config.LinkColumn("URL", display_text="fuente"),
+                                "Valor": st.column_config.NumberColumn(format="%.4f"),
+                                "Valor original": st.column_config.NumberColumn(format="%.4f")})
+
+    st.subheader(f"Perfil completo de {industry}")
+    st.caption("Si varias fuentes tienen la misma métrica, se muestran en columnas separadas, sin promediar.")
+    prof = D["metrics"][D["metrics"]["industry_std"] == industry]
+    piv = prof.pivot_table(index="metric", columns="source", values="value", aggfunc="first")
+    piv.insert(0, "Métrica", [D["defs"].loc[m, "label_es"] if m in D["defs"].index else m for m in piv.index])
+    piv.insert(1, "Unidad", [D["defs"].loc[m, "unit"] if m in D["defs"].index else "" for m in piv.index])
+    st.dataframe(piv.reset_index(drop=True), hide_index=True, width="stretch")
+
+    st.subheader("Etapa de crecimiento del sector")
+    grow_metrics = ["cagr_revenue_5y", "exp_revenue_growth_2y", "exp_revenue_growth_5y", "fundamental_ebit_growth", "reinvestment_rate", "roc"]
+    gr = [resolver.get(industry, m) for m in grow_metrics]
+    st.dataframe(pd.DataFrame([{"Indicador": r.label, "Valor": fmt_pct(r.value), "Original": fmt_pct(r.raw_value),
+                                "Recortado": "sí" if r.capped else "", "Fuente": r.source} for r in gr]),
+                 hide_index=True, width="stretch")
+
+    st.subheader("Datos de mercado")
+    mk = pd.DataFrame([
+        {"Serie": "Bono del Tesoro EE. UU. 10 años", "Valor": fmt_pct(us_rf["value"], 2), "Fecha": us_rf["date"], "Fuente": us_rf["source"], "URL": us_rf["url"]},
+        {"Serie": "Prima de riesgo implícita EE. UU.", "Valor": fmt_pct(erp_row["value"], 2), "Fecha": erp_row["date"], "Fuente": erp_row["source"], "URL": erp_row["url"]},
+        {"Serie": "Curva AAA zona euro 10 años", "Valor": fmt_pct(ea_rf["value"], 2), "Fecha": ea_rf["date"], "Fuente": ea_rf["source"], "URL": ea_rf["url"]},
+        {"Serie": "Tipo de cambio USD por EUR", "Valor": fmt_num(fx_row["rate"], 4), "Fecha": fx_row["date"], "Fuente": fx_row["source"], "URL": fx_row["url"]},
+    ])
+    st.dataframe(mk, hide_index=True, width="stretch", column_config={"URL": st.column_config.LinkColumn("URL", display_text="fuente")})
+
+    st.subheader("Registro de fuentes")
+    st.dataframe(D["sources"], hide_index=True, width="stretch")
+
+# ======================================================================= pie
+
+st.divider()
+used_sources = sorted({r.source for r in resolver.used.values() if not r.missing})
+foot = [f"**{source_names.get(s, s)}**: datos al {D['metrics'][D['metrics'].source == s]['as_of'].iloc[0]}" for s in used_sources]
+foot.append(f"**BCE**: tipo de cambio y curva AAA al {fx_row['date']}")
+foot.append("**Supuestos por etapa**: propios e ilustrativos")
+st.caption(" · ".join(foot))
+st.caption(
+    "Herramienta educativa y de análisis. **No constituye asesoramiento de inversión.** "
+    "Los resultados dependen de supuestos que el usuario debe revisar."
+)
