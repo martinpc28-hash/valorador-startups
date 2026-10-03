@@ -191,12 +191,19 @@ def load_company(company: dict) -> None:
 with st.sidebar:
     st.title("Valorador de Startups")
 
+    st.subheader("📁 Mis empresas")
     lib = my_companies()
     if lib:
         by_id = {c["id"]: c for c in lib}
         pick = st.selectbox("Cargar empresa guardada", list(by_id), format_func=lambda i: by_id[i]["name"], key="lib_pick")
-        st.button("Cargar en el modelo", on_click=load_company, args=(by_id[pick],), key="lib_load_btn",
+        st.button("Cargar en el modelo", on_click=load_company, args=(by_id[pick],), key="lib_load_btn", type="primary",
                   help="Sustituye las entradas de la barra lateral por las de la empresa guardada.")
+    else:
+        st.caption("Aún no hay empresas guardadas. Créalas en la pestaña **Mis empresas** y pulsa **💾 Guardar**: "
+                   "aparecerán aquí para cargarlas en el modelo.")
+    st.button("🔄 Actualizar lista", on_click=refresh_library, key="lib_refresh_btn",
+              help="Vuelve a leer la biblioteca (por si alguien guardó una empresa desde otra sesión).")
+    st.divider()
 
     _default("currency", "USD")
     currency = st.radio("Moneda base", ["USD", "EUR"], horizontal=True, key="currency",
@@ -365,8 +372,8 @@ with T["Read Me"]:
          "carga los datos de la empresa elegida en el modelo."),
         ("Mis empresas", "Biblioteca de empresas guardadas. Puedes crear una a mano o subir sus estados financieros "
          "en Excel, CSV o PDF: la app reconoce las partidas en español o inglés y la escala (miles o millones) y rellena "
-         "los campos. Revisa siempre lo detectado antes de guardar. Desde la barra lateral cargas una empresa guardada "
-         "en el modelo."),
+         "los campos. Revisa lo detectado y pulsa **💾 Guardar** al final de la pestaña. Una vez guardada, la empresa "
+         "aparece arriba en la barra lateral, en **📁 Mis empresas**, donde eliges **Cargar en el modelo**."),
         ("Fondos", "Analiza un fondo de VC desde el punto de vista del inversor: DPI, RVPI, TVPI, MOIC e IRR, curva J "
          "y una proyección simple de flujos. Compara el tamaño de tu fondo con los vehículos de VC que presentaron Form D."),
         ("Supuestos", "Tabla editable con los supuestos por etapa: IRR objetivo, probabilidad de supervivencia, "
@@ -1144,7 +1151,8 @@ def co_fill(summary: dict, fin: dict, files: list[str], detected_currency: str |
     st.session_state["co_fin"] = fin
     st.session_state["co_files"] = sorted(set(st.session_state.get("co_files", [])) | set(files))
     st.session_state["co_editor_v"] = st.session_state.get("co_editor_v", 0) + 1
-    st.session_state["co_msg"] = "Campos rellenados con los estados financieros. Revísalos antes de guardar."
+    st.session_state["co_msg"] = ("Campos rellenados con los estados financieros. Revísalos y pulsa 💾 Guardar al final "
+                                  "de la página: hasta entonces la empresa no está guardada.")
 
 
 def co_collect(fin_df: pd.DataFrame) -> dict:
@@ -1166,10 +1174,14 @@ def co_save(fin_df: pd.DataFrame, also_load: bool = False) -> None:
     if not c.get("id"):
         c.pop("id", None)
         c = {**cs.new_company(c["name"]), **c}
-    saved = company_store().save(current_user(), c)
+    try:
+        saved = company_store().save(current_user(), c)
+    except Exception as e:  # noqa: BLE001: el usuario debe ver por qué no se guardó
+        st.session_state["co_msg_err"] = f"No se pudo guardar: {e}"
+        return
     refresh_library()
     st.session_state["co_pick"] = saved["id"]
-    st.session_state["co_msg"] = f"«{saved['name']}» guardada."
+    st.session_state["co_msg"] = f"«{saved['name']}» guardada. Ya puedes cargarla desde la barra lateral (📁 Mis empresas)."
     if also_load:
         load_company(saved)
 
