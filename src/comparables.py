@@ -163,7 +163,7 @@ def comparison_table(user: dict, companies: pd.DataFrame, fmt_money, fmt_pct) ->
 
     def fmt(x, kind):
         if x is None or (isinstance(x, float) and math.isnan(x)) or (not isinstance(x, str) and pd.isna(x)):
-            return "—"
+            return "n/d"
         if kind == "money":
             return fmt_money(x)
         if kind == "pct":

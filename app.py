@@ -153,7 +153,7 @@ def my_companies() -> list[dict]:
     if "lib" not in st.session_state:
         try:
             st.session_state["lib"] = company_store().list(SHARED_OWNER)
-        except Exception as e:  # noqa: BLE001 — se muestra al usuario en lugar de romper la app
+        except Exception as e:  # noqa: BLE001: se muestra al usuario en lugar de romper la app
             st.session_state["lib"] = []
             st.session_state["lib_error"] = str(e)
     return st.session_state["lib"]
@@ -288,9 +288,142 @@ st.title("Valorador de Startups")
 st.caption(f"{industry} · {sector_of[industry]} · etapa {stage_label} · moneda {currency}")
 warn_box = st.container()
 
-tab_names = ["Resumen", "DCF", "Método VC", "Múltiplos", "Escenarios", "Monte Carlo", "Caja y ronda",
+tab_names = ["Read Me", "Resumen", "DCF", "Método VC", "Múltiplos", "Escenarios", "Monte Carlo", "Caja y ronda",
              "Comparables SEC", "Mis empresas", "Fondos", "Supuestos", "Datos y fuentes"]
 T = dict(zip(tab_names, st.tabs(tab_names)))
+
+# ======================================================================= Read Me
+
+
+def _sec_range(dataset: str) -> str:
+    try:
+        d = pd.read_csv(cmp.DATA / {"sec_form_d": "sec_form_d.csv.gz", "sec_form_c": "sec_form_c.csv.gz",
+                                    "sec_s1": "sec_s1.csv.gz"}[dataset], usecols=["filing_date"])
+        return f"{d['filing_date'].min()} a {d['filing_date'].max()} ({len(d):,} empresas)".replace(",", ".")
+    except Exception:  # noqa: BLE001: el Read Me no debe romperse si falta un archivo
+        return "n/d"
+
+
+with T["Read Me"]:
+    damo_date = D["metrics"][D["metrics"]["source"] == "damodaran"]["as_of"].iloc[0]
+    st.header("Cómo funciona el Valorador de Startups")
+    st.markdown(
+        "Esta aplicación estima cuánto vale una startup a partir de los datos que introduces en la barra lateral. "
+        "Combina cuatro métodos de valoración y los compara con la pre-money que se propone en la ronda. "
+        "Todos los supuestos que vienen de fuentes externas muestran su procedencia: pasa el cursor por el icono "
+        "**?** de cada número o abre la pestaña **Datos y fuentes**."
+    )
+    st.warning("Es una herramienta educativa y de análisis. No es asesoramiento de inversión.", icon="⚠️")
+
+    st.subheader("Qué hace este servidor")
+    st.markdown(
+        "- La app está escrita en Python con Streamlit y se ejecuta en **Google Cloud Run**, en la región de Madrid "
+        "(europe-southwest1). Cuando nadie la usa se apaga sola, así que no genera coste en reposo.\n"
+        "- Los datos de mercado e industria están guardados como archivos CSV dentro del propio proyecto. "
+        "La app **no descarga nada mientras la usas**: funciona igual sin conexión a internet.\n"
+        "- Las empresas que guardas en **Mis empresas** se almacenan en **Firestore**, la base de datos de Google "
+        "Cloud del mismo proyecto. Por ahora la biblioteca es compartida: cualquiera con el enlace puede verla.\n"
+        "- De los estados financieros que subes solo se guardan las cifras extraídas, nunca el archivo.\n"
+        "- El código está en GitHub. Cada cambio en la rama principal pasa las pruebas automáticas y, si todas "
+        "pasan, se publica solo una nueva versión."
+    )
+
+    st.subheader("Cómo empezar")
+    st.markdown(
+        "1. En la barra lateral elige la **industria**, la **etapa** y la **moneda**.\n"
+        "2. Introduce los datos de la empresa: ingresos, crecimiento, margen, burn rate y caja.\n"
+        "3. Introduce la ronda: dos de estos tres datos (inversión, pre-money o participación) y la app calcula el tercero.\n"
+        "4. Mira el veredicto en **Resumen** y entra en cada pestaña para ver el detalle.\n"
+        "5. Si quieres, guarda la empresa en **Mis empresas** o compárala con empresas reales en **Comparables SEC**."
+    )
+
+    st.subheader("Las pestañas")
+    tabs_doc = [
+        ("Resumen", "Muestra el rango de valor de cada método (DCF, método VC, múltiplos y Monte Carlo) frente a la "
+         "pre-money propuesta, y dice si la propuesta queda por debajo, dentro o por encima de ese rango."),
+        ("DCF", "Descuenta los flujos de caja futuros. Toma la beta de la industria, la ajusta a la deuda de la "
+         "startup y calcula el costo de capital. Proyecta 10 años: los ingresos crecen y convergen a una tasa estable, "
+         "el margen converge al de la industria y la reinversión sale del ratio ventas / capital. Tiene en cuenta las "
+         "pérdidas fiscales acumuladas y la probabilidad de que la empresa sobreviva. Incluye un mapa de sensibilidad "
+         "y un gráfico de las variables que más mueven el valor."),
+        ("Método VC", "Calcula el valor de salida (ingresos o EBITDA del año de salida por un múltiplo) y lo trae a hoy "
+         "con la rentabilidad objetivo del inversor y la dilución futura. Da la pre-money que justifica, la participación "
+         "necesaria y el MOIC e IRR con las condiciones propuestas. El riesgo de fracaso se cuenta una sola vez: o con "
+         "una IRR alta, o con el costo del equity multiplicado por la probabilidad de supervivencia."),
+        ("Múltiplos", "Valora la empresa con EV/Sales y EV/EBITDA de su industria y de las cotizadas más pequeñas, "
+         "con un descuento por iliquidez. Compara las empresas rentables con el conjunto, que incluye las que pierden dinero."),
+        ("Escenarios", "Repite la valoración en un caso pesimista, uno base y uno optimista. Los factores sobre "
+         "crecimiento, margen y múltiplo son editables."),
+        ("Monte Carlo", "Hace 10.000 simulaciones con semilla fija, así que el resultado siempre es el mismo. "
+         "Crecimiento, margen y múltiplo se mueven a la vez y de forma correlacionada, y también se simula el fracaso. "
+         "Muestra los percentiles P10, P50 y P90 y la probabilidad de alcanzar el MOIC objetivo."),
+        ("Caja y ronda", "Calcula cuántos meses de caja quedan (runway), proyecta la caja mes a mes, estima el "
+         "capital que necesita el plan y la dilución adicional que implicaría."),
+        ("Comparables SEC", "Buscador de empresas reales de EE. UU. que presentaron documentos ante la SEC: rondas "
+         "privadas (Form D), startups pequeñas con estados financieros (Form C) y salidas a bolsa (S-1). Selecciona "
+         "una o varias para compararlas con tu startup y ver en qué percentil queda tu ronda o tus ingresos. Un botón "
+         "carga los datos de la empresa elegida en el modelo."),
+        ("Mis empresas", "Biblioteca de empresas guardadas. Puedes crear una a mano o subir sus estados financieros "
+         "en Excel, CSV o PDF: la app reconoce las partidas en español o inglés y la escala (miles o millones) y rellena "
+         "los campos. Revisa siempre lo detectado antes de guardar. Desde la barra lateral cargas una empresa guardada "
+         "en el modelo."),
+        ("Fondos", "Analiza un fondo de VC desde el punto de vista del inversor: DPI, RVPI, TVPI, MOIC e IRR, curva J "
+         "y una proyección simple de flujos. Compara el tamaño de tu fondo con los vehículos de VC que presentaron Form D."),
+        ("Supuestos", "Tabla editable con los supuestos por etapa: IRR objetivo, probabilidad de supervivencia, "
+         "dilución futura, prima de iliquidez y descuento por iliquidez. Son supuestos propios e ilustrativos."),
+        ("Datos y fuentes", "Lista cada número de la industria que se está usando, con su fuente, fecha, URL y avisos "
+         "(si se recortó un valor extremo o se usó un dato de reemplazo). También muestra el perfil completo de la "
+         "industria y el registro de fuentes."),
+    ]
+    for name, text in tabs_doc:
+        st.markdown(f"**{name}.** {text}")
+
+    st.subheader("La barra lateral")
+    st.markdown(
+        "Ahí están todas las entradas del modelo. Cualquier cambio recalcula todas las pestañas al instante. "
+        "Los valores marcados con **?** explican de dónde salen. En **Fuentes de datos** eliges el orden de prioridad "
+        "entre fuentes y si se recortan los valores extremos. En **Supuestos anclados en la industria** puedes sustituir "
+        "el margen objetivo, el ratio ventas / capital o el múltiplo de salida de la industria por los tuyos."
+    )
+
+    st.subheader("Fuentes de datos")
+    fx_date = fx_row["date"] if fx_row is not None else "n/d"
+    sources_doc = pd.DataFrame([
+        {"Fuente": "Aswath Damodaran (NYU Stern)", "Qué aporta": "Betas, costo de capital, márgenes, múltiplos, crecimiento "
+         "y reinversión de 94 industrias de EE. UU.; riesgo y múltiplos por tamaño; prima de riesgo implícita",
+         "Fecha de los datos": damo_date, "Condiciones": "Uso libre, solo agregados por industria",
+         "Enlace": "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datacurrent.html"},
+        {"Fuente": "Banco Central Europeo", "Qué aporta": "Tipo de cambio EUR/USD y tasa libre de riesgo en euros "
+         "(curva AAA a 10 años)", "Fecha de los datos": fx_date, "Condiciones": "Uso libre citando al BCE",
+         "Enlace": "https://data.ecb.europa.eu/"},
+        {"Fuente": "SEC EDGAR, Form D", "Qué aporta": "Rondas privadas: importe, inversores, industria y rango de ingresos",
+         "Fecha de los datos": _sec_range("sec_form_d"), "Condiciones": "Información pública, redistribuible",
+         "Enlace": "https://www.sec.gov/data-research/sec-markets-data/form-d-data-sets"},
+        {"Fuente": "SEC EDGAR, Form C", "Qué aporta": "Estados financieros de startups pequeñas (crowdfunding)",
+         "Fecha de los datos": _sec_range("sec_form_c"), "Condiciones": "Información pública, redistribuible",
+         "Enlace": "https://www.sec.gov/data-research/sec-markets-data/crowdfunding-offerings-data-sets"},
+        {"Fuente": "SEC EDGAR, S-1 y XBRL", "Qué aporta": "Empresas que solicitaron salir a bolsa, con sus ingresos y márgenes",
+         "Fecha de los datos": _sec_range("sec_s1"), "Condiciones": "Información pública, redistribuible",
+         "Enlace": "https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data"},
+        {"Fuente": "Supuestos propios", "Qué aporta": "Parámetros por etapa (IRR objetivo, supervivencia, dilución, iliquidez)",
+         "Fecha de los datos": "n/d", "Condiciones": "Ilustrativos y editables", "Enlace": None},
+    ])
+    st.dataframe(sources_doc, hide_index=True, width="stretch",
+                 column_config={"Enlace": st.column_config.LinkColumn("Enlace", display_text="abrir")})
+    st.markdown(
+        "Las fuentes que se investigaron pero aún no se integran (FRED, Kenneth French, Pablo Fernandez, Kroll, Carta, "
+        "PitchBook) están en la pestaña **Datos y fuentes**, con el motivo. Nunca se promedian dos fuentes en silencio: "
+        "si una métrica falta en la fuente preferida se usa la siguiente y la app lo avisa."
+    )
+
+    st.subheader("Limitaciones que conviene conocer")
+    st.markdown(
+        "- Los datos de Damodaran son de empresas cotizadas de EE. UU. Para una startup europea son una referencia, no una medida exacta.\n"
+        "- Los múltiplos de la industria vienen de empresas grandes. Para una startup suelen ser altos: compáralos con los de las cotizadas más pequeñas.\n"
+        "- Form D y Form C no informan la valoración de las empresas.\n"
+        "- Los supuestos por etapa son ilustrativos hasta que se integre una fuente verificada con datos por etapa.\n"
+        "- La lectura de estados financieros en PDF es la menos fiable: revisa siempre lo detectado."
+    )
 
 with T["Supuestos"]:
     st.subheader("Supuestos por etapa")
@@ -339,9 +472,9 @@ with T["Monte Carlo"]:
         moic_target=c4.number_input("MOIC objetivo", 0.5, 100.0, 3.0, 0.5),
     )
     c5, c6, c7, c8 = st.columns(4)
-    mc.corr_growth_margin = c5.number_input("Correlación crecimiento–margen", -0.95, 0.95, -0.2, 0.05)
-    mc.corr_growth_multiple = c6.number_input("Correlación crecimiento–múltiplo", -0.95, 0.95, 0.5, 0.05)
-    mc.corr_margin_multiple = c7.number_input("Correlación margen–múltiplo", -0.95, 0.95, 0.2, 0.05)
+    mc.corr_growth_margin = c5.number_input("Correlación crecimiento y margen", -0.95, 0.95, -0.2, 0.05)
+    mc.corr_growth_multiple = c6.number_input("Correlación crecimiento y múltiplo", -0.95, 0.95, 0.5, 0.05)
+    mc.corr_margin_multiple = c7.number_input("Correlación margen y múltiplo", -0.95, 0.95, 0.2, 0.05)
     mc.include_failure = c8.checkbox("Incluir fracaso (supervivencia)", True)
     st.caption(f"{mc.n_sims:,} simulaciones con semilla fija {mc.seed}: el resultado es reproducible.".replace(",", "."))
 
@@ -484,11 +617,11 @@ ff_rows = [
 ]
 if not valid_mult.empty:
     ff_rows.append({"method": "Múltiplos", "low": valid_mult.min(), "high": valid_mult.max(),
-                    "mid": float(mult_df["Valor del equity"].iloc[0]), "range_label": "Mín–máx"})
+                    "mid": float(mult_df["Valor del equity"].iloc[0]), "range_label": "Mín a máx"})
 p = mc_res.percentiles["Valor DCF"]
 # Central = media: con fracaso incluido la mediana puede caer en un escenario de quiebra,
 # y la media es la magnitud comparable con el DCF (valor esperado).
-ff_rows.append({"method": "Monte Carlo (DCF)", "low": p["P10"], "high": p["P90"], "mid": p["Media"], "range_label": "P10–P90"})
+ff_rows.append({"method": "Monte Carlo (DCF)", "low": p["P10"], "high": p["P90"], "mid": p["Media"], "range_label": "P10 a P90"})
 ff_rows = [r for r in ff_rows if not any(math.isnan(r[k]) for k in ("low", "high", "mid"))]
 
 mids = [r["mid"] for r in ff_rows]
@@ -877,8 +1010,8 @@ with T["Comparables SEC"]:
     pctl = cmp.percentile_of(your, series[series > 0])
     k1, k2, k3 = st.columns(3)
     metric(k1, f"Empresas en la muestra", f"{int((series > 0).sum()):,}".replace(",", "."))
-    metric(k2, f"Mediana de {what}", fmt_money(float(series[series > 0].median()) / rate, currency) if (series > 0).any() else "—")
-    metric(k3, f"Tu {what}: percentil", fmt_pct(pctl, 0) if not math.isnan(pctl) else "—",
+    metric(k2, f"Mediana de {what}", fmt_money(float(series[series > 0].median()) / rate, currency) if (series > 0).any() else "n/d")
+    metric(k3, f"Tu {what}: percentil", fmt_pct(pctl, 0) if not math.isnan(pctl) else "n/d",
            help=f"Porcentaje de la muestra con {what} menor que el tuyo ({fmt_money(your / rate, currency)}).")
     if (series > 0).sum() >= 10:
         st.plotly_chart(ch.log_histogram(series[series > 0] / rate, f"Distribución de {what} en la muestra",
@@ -897,7 +1030,7 @@ with T["Comparables SEC"]:
         st.subheader("Comparación con tu startup")
         user = {
             "industry_std": industry, "revenue": revenue0, "growth": growth, "operating_margin": current_margin,
-            "cash": cash, "round_size": terms.investment, "filing_date": "—",
+            "cash": cash, "round_size": terms.investment, "filing_date": "n/d",
         }
         shown = picked.copy()
         for c in ("revenue", "revenue_est", "cash", "round_size", "total_sold"):
@@ -1082,7 +1215,7 @@ with T["Mis empresas"]:
         for f in files:
             try:
                 results.append((f.name, stm.parse_statement(f.getvalue(), f.name)))
-            except Exception as e:  # noqa: BLE001 — archivo ilegible: se informa y se sigue con los demás
+            except Exception as e:  # noqa: BLE001: archivo ilegible: se informa y se sigue con los demás
                 st.error(f"{f.name}: no se pudo leer ({e}).")
         for name, r in results:
             for w in r.warnings:
@@ -1167,7 +1300,7 @@ with T["Fondos"]:
     if up is not None:
         try:
             base_flows = pd.read_csv(up, parse_dates=["date"])[["date", "capital_call", "distribution", "nav"]]
-        except Exception as e:  # noqa: BLE001 — el usuario debe ver por qué no se pudo leer
+        except Exception as e:  # noqa: BLE001: el usuario debe ver por qué no se pudo leer
             st.error(f"No se pudo leer el CSV: {e}")
     else:
         st.info("Datos de **ejemplo ilustrativo**. Edita la tabla o carga tu CSV.")

@@ -39,13 +39,13 @@ def _es(text: str) -> str:
 
 def fmt_num(x: float, decimals: int = 1) -> str:
     if x is None or (isinstance(x, float) and (math.isnan(x) or math.isinf(x))):
-        return "—" if not (isinstance(x, float) and math.isinf(x)) else "∞"
+        return "n/d" if not (isinstance(x, float) and math.isinf(x)) else "∞"
     return _es(f"{x:,.{decimals}f}")
 
 
 def fmt_money(x: float, currency: str = "USD", decimals: int = 2) -> str:
     if x is None or (isinstance(x, float) and math.isnan(x)):
-        return "—"
+        return "n/d"
     sym = CURRENCY_SYMBOL.get(currency, currency)
     a = abs(x)
     if a >= 1e9:
@@ -61,13 +61,13 @@ def fmt_money(x: float, currency: str = "USD", decimals: int = 2) -> str:
 
 def fmt_pct(x: float, decimals: int = 1) -> str:
     if x is None or (isinstance(x, float) and (math.isnan(x) or math.isinf(x))):
-        return "—"
+        return "n/d"
     return f"{fmt_num(x * 100, decimals)} %"
 
 
 def fmt_mult(x: float, decimals: int = 2) -> str:
     if x is None or (isinstance(x, float) and math.isnan(x)):
-        return "—"
+        return "n/d"
     return f"{fmt_num(x, decimals)}x"
 
 
@@ -105,7 +105,7 @@ def _layout(fig: go.Figure, title: str = "", height: int = 360, **kw) -> go.Figu
 
 
 def football_field(rows: list[dict], pre_money: float, currency: str) -> go.Figure:
-    """Rango (bajo–alto) y punto central de cada método frente a la pre-money propuesta."""
+    """Rango (bajo a alto) y punto central de cada método frente a la pre-money propuesta."""
     scale, unit = money_scale([v for r in rows for v in (r["low"], r["high"], r["mid"])] + [pre_money])
     sym = CURRENCY_SYMBOL[currency]
     names = [r["method"] for r in rows][::-1]

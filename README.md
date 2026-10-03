@@ -60,7 +60,7 @@ Todos los datos son CSV versionados en `data/`. No hay archivos Excel y la app n
 | [SEC EDGAR](https://www.sec.gov/data-research/sec-markets-data) Form D | Ofertas privadas: importe ofrecido y vendido, inversores, grupo de industria y rango de ingresos (empresa a empresa) | jul-2025 a jun-2026 | Información pública de sec.gov, redistribuible sin permiso ([política](https://www.sec.gov/about/privacy-information)) |
 | SEC EDGAR Form C | Crowdfunding: estados financieros de startups pequeñas (ingresos, beneficio neto, caja, deuda, empleados) y condiciones de la oferta | jul-2025 a jun-2026 | Igual que Form D |
 | SEC EDGAR S-1 + XBRL | Empresas que presentaron un S-1 con ingresos en XBRL; sin SPACs, trusts ni fondos | oct-2025 a sep-2026 | Igual que Form D |
-| Supuestos propios | Parámetros por etapa (semilla a madura) | — | Ilustrativos, editables en la app |
+| Supuestos propios | Parámetros por etapa (semilla a madura) | n/d | Ilustrativos, editables en la app |
 
 Los datos de la SEC son por empresa. **No se guardan personas, firmantes, direcciones ni teléfonos**, solo datos de la empresa, y cada fila enlaza a su presentación en EDGAR. Ni Form D ni Form C informan la valoración. Form C tampoco informa la industria.
 

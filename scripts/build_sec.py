@@ -4,9 +4,9 @@ No hace falta para ejecutar la app: documenta cómo se generaron los datos de `d
 
 Fuentes (gratuitas; "Information presented on sec.gov is considered public information and
 may be copied or further distributed by users of the web site without the SEC's permission"):
-    Form D  — datasets trimestrales de avisos de ofertas privadas (Reg D)
-    Form C  — datasets trimestrales de crowdfunding (Reg CF): estados financieros de la empresa
-    S-1     — índice de presentaciones de EDGAR + API XBRL "frames" para los financieros
+    Form D : datasets trimestrales de avisos de ofertas privadas (Reg D)
+    Form C : datasets trimestrales de crowdfunding (Reg CF): estados financieros de la empresa
+    S-1    : índice de presentaciones de EDGAR + API XBRL "frames" para los financieros
 
 La SEC exige identificarse con nombre y correo de contacto en el User-Agent:
     set SEC_USER_AGENT=valorador-startups tu@correo.com      (Windows)
