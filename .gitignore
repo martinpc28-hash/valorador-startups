@@ -10,3 +10,4 @@ __pycache__/
 *.xlsx
 *.xlsm
 .streamlit/secrets.toml
+.local_companies/

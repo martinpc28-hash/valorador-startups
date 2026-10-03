@@ -75,5 +75,34 @@ def test_comparables_sources_and_fund_tab_render():
     assert any(m.label.startswith("TVPI") for m in at.metric)
 
 
+def test_account_save_company_and_load_into_model(tmp_path, monkeypatch):
+    monkeypatch.setenv("VALORADOR_STORE", "local")
+    monkeypatch.setenv("VALORADOR_LOCAL_DIR", str(tmp_path))
+    import importlib
+
+    import src.company_store as store_mod
+    importlib.reload(store_mod)
+
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.run()
+    next(r for r in at.radio if r.label == "Cuenta").set_value("Crear cuenta")
+    at.run()
+    next(t for t in at.text_input if t.label == "Usuario nuevo").input("tester")
+    next(t for t in at.text_input if t.label == "Contraseña").input("clave-segura")
+    at.run()
+    next(b for b in at.button if b.label == "Crear cuenta y entrar").click()
+    at.run()
+    assert at.session_state["user"] == "tester"
+
+    next(t for t in at.text_input if t.label == "Nombre").input("Mi Startup")
+    next(n for n in at.number_input if n.label == "Ingresos últimos 12 meses").set_value(4_000_000.0)
+    at.run()
+    next(b for b in at.button if b.label == "Guardar y cargar en el modelo").click()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert [c["name"] for c in store_mod.LocalStore(tmp_path).list("tester")] == ["Mi Startup"]
+    assert next(n for n in at.number_input if n.label.startswith("Ingresos últimos 12 meses (")).value == 4_000_000.0
+
+
 def test_vc_survival_mode_and_ebitda_exit():
     run(**{"Tratamiento del riesgo de fracaso": "Costo del equity × supervivencia", "Múltiplo de salida": "EV/EBITDA", "Beta": "De mercado"})

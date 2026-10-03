@@ -19,6 +19,7 @@ Aplicación web (Streamlit) que valora una startup a partir de las variables que
 | **Monte Carlo** | 10.000 simulaciones con semilla fija. Crecimiento, margen y múltiplo correlacionados; fracaso simulado; P10/P50/P90 y probabilidad de alcanzar un MOIC objetivo |
 | **Caja y ronda** | Runway, caja mensual, capital que consume el plan y dilución adicional implícita |
 | **Comparables SEC** | Buscador de empresas reales en Form D (rondas privadas), Form C (startups con estados financieros) y S-1 (salidas a bolsa). Filtros por nombre, industria y antigüedad. Al seleccionar una o varias se comparan con tu startup y se ve en qué percentil queda tu ronda o tus ingresos. Un botón **precarga** los datos de la empresa elegida en el modelo |
+| **Mis empresas** | Biblioteca personal (usuario y contraseña propios de la app). Creas plantillas de empresas y subes sus estados financieros en Excel, CSV o PDF. La app detecta las partidas en español o inglés (ingresos, EBIT, beneficio neto, caja, deuda, flujo operativo, empleados) y la escala, y rellena ingresos, crecimiento, margen, caja, deuda, burn estimado y pérdidas acumuladas. Revisas, guardas, y desde la barra lateral la cargas en el modelo o la añades a la comparación |
 | **Fondos** | Métricas de un fondo de VC (DPI, RVPI, TVPI, MOIC e IRR con XIRR propio), curva J, proyección tipo Takahashi-Alexander y tamaño frente a los vehículos de VC que presentaron Form D. Flujos editables o cargados desde CSV |
 | **Supuestos** | Tabla editable por etapa: IRR objetivo, supervivencia, dilución, iliquidez |
 | **Datos y fuentes** | Cada número usado con su fuente, fecha, URL y avisos (reemplazos y recortes) |
@@ -143,6 +144,8 @@ src/valuation.py       beta, DCF, método VC, múltiplos, escenarios
 src/montecarlo.py      simulación
 src/fund.py            métricas de fondos: DPI, RVPI, TVPI, XIRR, curva J, proyección
 src/comparables.py     empresas de la SEC: búsqueda, comparación y precarga
+src/statements.py      lectura de estados financieros (Excel, CSV, PDF)
+src/company_store.py   cuentas (hash PBKDF2) y biblioteca de empresas (Firestore o archivo local)
 src/charts.py          gráficos y formato de números
 data/                  CSV con procedencia
 scripts/               un script por fuente
@@ -160,6 +163,8 @@ gcloud config set project <ID_DEL_PROYECTO>
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
 gcloud run deploy valorador-startups --source . --region europe-southwest1 --allow-unauthenticated --session-affinity --min-instances 0 --max-instances 2 --memory 1Gi
 ```
+
+La biblioteca de empresas usa **Firestore** (base de datos nativa en `europe-southwest1`) cuando la app corre en Cloud Run. La cuenta de servicio del servicio necesita `roles/datastore.user`, y no hace falta ninguna clave. En local se guarda en `.local_companies/` (no se versiona). Para usar Firestore en local: `VALORADOR_STORE=firestore` y `gcloud auth application-default login`. De los archivos subidos solo se guardan las cifras extraídas, no el archivo.
 
 Despliegue continuo: crea un repositorio de Artifact Registry llamado `valorador` en la región y un activador de Cloud Build conectado al repositorio de GitHub que use `cloudbuild.yaml`. Cada push a `main` ejecuta las pruebas, construye la imagen y la despliega.
 

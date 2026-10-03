@@ -28,6 +28,8 @@ from src.data import (
     load_stage_assumptions,
 )
 from src import comparables as cmp
+from src import company_store as cs
+from src import statements as stm
 from src.fund import fund_metrics, j_curve, project_cash_flows
 from src.montecarlo import MCSettings, simulate
 from src.valuation import (
@@ -130,11 +132,136 @@ def apply_prefill(values: dict, cur: str) -> None:
     st.session_state["prefill_msg"] = values.get("_label", "")
 
 
+# ----------------------------------------------------------------------- cuentas y biblioteca
+
+
+@st.cache_resource(show_spinner=False)
+def company_store():
+    return cs.get_store()
+
+
+@st.cache_resource(show_spinner=False)
+def accounts_store():
+    return cs.get_accounts()
+
+
+def current_user() -> str | None:
+    return st.session_state.get("user")
+
+
+def my_companies() -> list[dict]:
+    """Biblioteca del usuario con sesión, cacheada en la sesión hasta que se guarda o borra algo."""
+    user = current_user()
+    if not user:
+        return []
+    if st.session_state.get("lib_owner") != user or "lib" not in st.session_state:
+        try:
+            st.session_state["lib"] = company_store().list(user)
+        except Exception as e:  # noqa: BLE001 — se muestra al usuario en lugar de romper la app
+            st.session_state["lib"] = []
+            st.session_state["lib_error"] = str(e)
+        st.session_state["lib_owner"] = user
+    return st.session_state["lib"]
+
+
+def refresh_library() -> None:
+    st.session_state.pop("lib", None)
+
+
+def do_login() -> None:
+    import time
+
+    blocked_until = st.session_state.get("login_blocked_until", 0)
+    if time.time() < blocked_until:
+        st.session_state["login_error"] = f"Demasiados intentos. Espera {int(blocked_until - time.time())} s."
+        st.session_state["login_pass"] = ""
+        return
+    u = cs.authenticate(accounts_store(), st.session_state.get("login_user", ""), st.session_state.get("login_pass", ""))
+    if u:
+        st.session_state["user"] = u
+        st.session_state.pop("login_error", None)
+        st.session_state["login_fails"] = 0
+        refresh_library()
+    else:
+        fails = st.session_state.get("login_fails", 0) + 1
+        st.session_state["login_fails"] = fails
+        st.session_state["login_error"] = "Usuario o contraseña incorrectos."
+        if fails >= 5:  # freno básico a la fuerza bruta desde una misma sesión
+            st.session_state["login_blocked_until"] = time.time() + 60
+            st.session_state["login_fails"] = 0
+    st.session_state["login_pass"] = ""
+
+
+def do_register() -> None:
+    try:
+        u = cs.register(accounts_store(), st.session_state.get("reg_user", ""), st.session_state.get("reg_pass", ""))
+        st.session_state["user"] = u
+        st.session_state.pop("login_error", None)
+        refresh_library()
+    except cs.AccountError as e:
+        st.session_state["login_error"] = str(e)
+    st.session_state["reg_pass"] = ""
+
+
+def do_logout() -> None:
+    for k in ("user", "lib", "lib_owner"):
+        st.session_state.pop(k, None)
+
+
+def load_company(company: dict) -> None:
+    """Callback: carga una empresa guardada en las entradas del modelo (en su propia moneda)."""
+    inp = company.get("inputs", {})
+    if company.get("currency") in ("USD", "EUR"):
+        st.session_state["currency"] = company["currency"]
+    money_keys = {"revenue": "rev0", "burn": "burn", "cash": "cash", "investment": "inv", "pre_money": "pre",
+                  "debt": "debt", "nol": "nol"}
+    for field, key in money_keys.items():
+        if inp.get(field) is not None:
+            st.session_state[key] = float(inp[field])
+    for field, key in {"growth": "growth", "current_margin": "cm"}.items():
+        if inp.get(field) is not None:
+            st.session_state[key] = round(float(inp[field]) * 100, 2)
+    if inp.get("investment") is not None and inp.get("pre_money") is not None:
+        st.session_state["solve_for"] = "Participación"
+    if company.get("industry") in set(industries["industry_std"]):
+        st.session_state["industry"] = company["industry"]
+    if company.get("stage") in set(stages["stage_label"]):
+        st.session_state["stage"] = company["stage"]
+    st.session_state["prefill_msg"] = company.get("name", "empresa guardada")
+
+
 # ======================================================================= barra lateral
 
 with st.sidebar:
     st.title("Valorador de Startups")
-    currency = st.radio("Moneda base", ["USD", "EUR"], horizontal=True,
+
+    with st.expander(f"👤 {current_user()}" if current_user() else "👤 Cuenta: mis empresas", expanded=False):
+        if current_user():
+            st.caption("Tus empresas guardadas solo las ves tú.")
+            st.button("Cerrar sesión", on_click=do_logout, key="logout_btn")
+        else:
+            st.caption("Entra para guardar empresas y cargarlas en el modelo. La valoración funciona sin cuenta.")
+            mode = st.radio("Cuenta", ["Entrar", "Crear cuenta"], horizontal=True, label_visibility="collapsed", key="acc_mode")
+            if mode == "Entrar":
+                st.text_input("Usuario", key="login_user")
+                st.text_input("Contraseña", type="password", key="login_pass")
+                st.button("Entrar", on_click=do_login, type="primary", key="login_btn")
+            else:
+                st.text_input("Usuario nuevo", key="reg_user", help="3 a 32 caracteres: letras, números, punto, guion o guion bajo.")
+                st.text_input("Contraseña", type="password", key="reg_pass", help="Mínimo 6 caracteres. Se guarda cifrada.")
+                st.button("Crear cuenta y entrar", on_click=do_register, type="primary", key="reg_btn")
+            if st.session_state.get("login_error"):
+                st.error(st.session_state["login_error"])
+
+    lib = my_companies()
+    if lib:
+        by_id = {c["id"]: c for c in lib}
+        pick = st.selectbox("Cargar empresa guardada", list(by_id), format_func=lambda i: by_id[i]["name"], key="lib_pick")
+        st.button("Cargar en el modelo", on_click=load_company, args=(by_id[pick],), key="lib_load_btn",
+                  help="Sustituye las entradas de la barra lateral por las de la empresa guardada.")
+
+    _default("currency", "USD")
+    currency = st.radio("Moneda base", ["USD", "EUR"], horizontal=True, key="currency",
                         help="Los importes se introducen y se muestran en esta moneda.")
     sym = ch.CURRENCY_SYMBOL[currency]
 
@@ -147,7 +274,8 @@ with st.sidebar:
         format_func=lambda i: f"{i} · {sector_of[i]}",
         help="Taxonomía propia (industry_std) con equivalencias desde la clasificación de cada fuente.",
     )
-    stage_label = st.selectbox("Etapa", stages["stage_label"].tolist(), index=1)
+    _default("stage", stages["stage_label"].iloc[1])
+    stage_label = st.selectbox("Etapa", stages["stage_label"].tolist(), key="stage")
 
     with st.expander("Fuentes de datos"):
         available = list(dict.fromkeys(D["metrics"]["source"]))
@@ -223,7 +351,7 @@ st.caption(f"{industry} · {sector_of[industry]} · etapa {stage_label} · moned
 warn_box = st.container()
 
 tab_names = ["Resumen", "DCF", "Método VC", "Múltiplos", "Escenarios", "Monte Carlo", "Caja y ronda",
-             "Comparables SEC", "Fondos", "Supuestos", "Datos y fuentes"]
+             "Comparables SEC", "Mis empresas", "Fondos", "Supuestos", "Datos y fuentes"]
 T = dict(zip(tab_names, st.tabs(tab_names)))
 
 with T["Supuestos"]:
@@ -819,7 +947,15 @@ with T["Comparables SEC"]:
                                          f"{what.capitalize()} ({sym}, escala logarítmica)",
                                          {"Tu startup": your / rate}), width="stretch")
 
-    if not picked.empty:
+    lib_now = my_companies()
+    mine = []
+    if lib_now:
+        lib_by_id = {c["id"]: c for c in lib_now}
+        mine_ids = st.multiselect("Añadir mis empresas guardadas a la comparación", list(lib_by_id),
+                                  format_func=lambda i: lib_by_id[i]["name"], key="sec_mine")
+        mine = [lib_by_id[i] for i in mine_ids]
+
+    if not picked.empty or mine:
         st.subheader("Comparación con tu startup")
         user = {
             "industry_std": industry, "revenue": revenue0, "growth": growth, "operating_margin": current_margin,
@@ -829,8 +965,26 @@ with T["Comparables SEC"]:
         for c in ("revenue", "revenue_est", "cash", "round_size", "total_sold"):
             if c in shown:
                 shown[c] = shown[c] / rate
+        own_rows = []
+        for c in mine:
+            fx_c = usd_rate(c.get("currency") or "USD") / rate  # moneda de la empresa -> moneda base
+            inp = c.get("inputs") or {}
+            fin = c.get("financials") or {}
+            last = fin[max(fin, key=str)] if fin else {}
+            m = lambda k: (inp.get(k) or 0) * fx_c if inp.get(k) is not None else np.nan  # noqa: E731
+            own_rows.append({
+                "name": f"{c['name']} (guardada)", "industry_std": c.get("industry"), "revenue": m("revenue"),
+                "growth": inp.get("growth"), "operating_margin": inp.get("current_margin"),
+                "net_margin": (last.get("net_income") / last["revenue"]) if last.get("revenue") and last.get("net_income") is not None else np.nan,
+                "cash": m("cash"), "round_size": m("investment"), "employees": last.get("employees", np.nan),
+                "filing_date": (c.get("updated_at") or "")[:10],
+            })
+        if own_rows:
+            shown = pd.concat([pd.DataFrame(own_rows), shown], ignore_index=True)
         st.dataframe(cmp.comparison_table(user, shown, lambda x: fmt_money(x, currency), fmt_pct),
                      hide_index=True, width="stretch")
+
+    if not picked.empty:
 
         st.subheader("Precargar en el modelo")
         who = st.selectbox("Empresa", picked.index, format_func=lambda i: picked.loc[i, "name"], key=f"sec_prefill_{ds}")
@@ -851,6 +1005,213 @@ with T["Comparables SEC"]:
             )
         else:
             st.info("Esta presentación no trae datos que se puedan cargar en el modelo.")
+
+# ======================================================================= Mis empresas
+
+CO_MONEY = [("revenue", "Ingresos últimos 12 meses"), ("burn", "Burn rate mensual"), ("cash", "Caja disponible"),
+            ("debt", "Deuda financiera"), ("nol", "Pérdidas fiscales acumuladas"), ("investment", "Inversión de la ronda"),
+            ("pre_money", "Pre-money propuesta")]
+CO_PCT = [("growth", "Crecimiento anual de ingresos (%)"), ("current_margin", "Margen operativo actual (%)")]
+ITEM_LABEL = {k: v[0] for k, v in stm.ITEMS.items()}
+LABEL_ITEM = {v: k for k, v in ITEM_LABEL.items()}
+
+
+def _fin_to_editor(fin: dict) -> pd.DataFrame:
+    """{año: {partida: valor}} -> tabla editable (filas = partidas, columnas = años)."""
+    if not fin:
+        return pd.DataFrame({"Partida": [ITEM_LABEL[i] for i in ("revenue", "operating_income", "net_income", "cash")]})
+    df = pd.DataFrame(fin).reindex([i for i in stm.ITEM_ORDER if any(i in v for v in fin.values())])
+    df.index = [ITEM_LABEL[i] for i in df.index]
+    df = df[sorted(df.columns, key=str)]
+    return df.rename_axis("Partida").reset_index()
+
+
+def _editor_to_fin(df: pd.DataFrame) -> dict:
+    out: dict[str, dict] = {}
+    for _, row in df.iterrows():
+        item = LABEL_ITEM.get(str(row.get("Partida", "")).strip())
+        if not item:
+            continue
+        for col in df.columns:
+            if col == "Partida":
+                continue
+            v = stm.parse_amount(row[col])
+            if not math.isnan(v):
+                out.setdefault(str(col), {})[item] = v
+    return out
+
+
+def co_select() -> None:
+    """Callback del selector: vuelca la empresa elegida (o una nueva) en el formulario."""
+    sel = st.session_state.get("co_pick")
+    c = next((x for x in my_companies() if x["id"] == sel), None) or cs.new_company()
+    st.session_state["co_name"] = c.get("name", "")
+    st.session_state["co_industry"] = c.get("industry") or industry
+    st.session_state["co_stage"] = c.get("stage") or stage_label
+    st.session_state["co_currency"] = c.get("currency") or currency
+    st.session_state["co_notes"] = c.get("notes", "")
+    inp = c.get("inputs", {})
+    for k, _ in CO_MONEY:
+        st.session_state[f"co_{k}"] = float(inp.get(k) or 0.0)
+    for k, _ in CO_PCT:
+        st.session_state[f"co_{k}"] = round(float(inp.get(k) or 0.0) * 100, 2)
+    st.session_state["co_fin"] = c.get("financials", {})
+    st.session_state["co_files"] = c.get("source_files", [])
+    st.session_state["co_editor_v"] = st.session_state.get("co_editor_v", 0) + 1
+
+
+def co_fill(summary: dict, fin: dict, files: list[str], detected_currency: str | None) -> None:
+    """Callback: rellena el formulario con lo detectado en los estados financieros."""
+    for k, _ in CO_MONEY:
+        if k in summary:
+            st.session_state[f"co_{k}"] = float(round(summary[k]))
+    for k, _ in CO_PCT:
+        if k in summary:
+            st.session_state[f"co_{k}"] = round(summary[k] * 100, 2)
+    if detected_currency in ("USD", "EUR"):
+        st.session_state["co_currency"] = detected_currency
+    st.session_state["co_fin"] = fin
+    st.session_state["co_files"] = sorted(set(st.session_state.get("co_files", [])) | set(files))
+    st.session_state["co_editor_v"] = st.session_state.get("co_editor_v", 0) + 1
+    st.session_state["co_msg"] = "Campos rellenados con los estados financieros. Revísalos antes de guardar."
+
+
+def co_collect(fin_df: pd.DataFrame) -> dict:
+    c = {"id": st.session_state.get("co_pick") if st.session_state.get("co_pick") != "__new__" else None,
+         "name": st.session_state.get("co_name", "").strip(), "industry": st.session_state.get("co_industry"),
+         "stage": st.session_state.get("co_stage"), "currency": st.session_state.get("co_currency"),
+         "notes": st.session_state.get("co_notes", ""),
+         "inputs": {**{k: st.session_state.get(f"co_{k}") for k, _ in CO_MONEY},
+                    **{k: (st.session_state.get(f"co_{k}") or 0) / 100 for k, _ in CO_PCT}},
+         "financials": _editor_to_fin(fin_df), "source_files": st.session_state.get("co_files", [])}
+    return {k: v for k, v in c.items() if v is not None or k != "id"}
+
+
+def co_save(fin_df: pd.DataFrame, also_load: bool = False) -> None:
+    c = co_collect(fin_df)
+    if not c["name"]:
+        st.session_state["co_msg_err"] = "Ponle un nombre a la empresa."
+        return
+    if not c.get("id"):
+        c.pop("id", None)
+        c = {**cs.new_company(c["name"]), **c}
+    saved = company_store().save(current_user(), c)
+    refresh_library()
+    st.session_state["co_pick"] = saved["id"]
+    st.session_state["co_msg"] = f"«{saved['name']}» guardada."
+    if also_load:
+        load_company(saved)
+
+
+def co_delete() -> None:
+    sel = st.session_state.get("co_pick")
+    if sel and sel != "__new__":
+        company_store().delete(current_user(), sel)
+        refresh_library()
+        st.session_state["co_pick"] = "__new__"
+        co_select()
+        st.session_state["co_msg"] = "Empresa eliminada."
+
+
+with T["Mis empresas"]:
+    if not current_user():
+        st.info("Entra o crea una cuenta en la barra lateral (👤 Cuenta) para guardar empresas. "
+                "Cada usuario solo ve sus propias empresas.")
+    else:
+        if st.session_state.get("lib_error"):
+            st.error(f"No se pudo leer la biblioteca: {st.session_state.pop('lib_error')}")
+        lib = my_companies()
+        by_id = {c["id"]: c for c in lib}
+        if "co_pick" not in st.session_state or (st.session_state["co_pick"] != "__new__" and st.session_state["co_pick"] not in by_id):
+            st.session_state["co_pick"] = "__new__"
+        if "co_name" not in st.session_state:
+            co_select()
+        st.selectbox("Empresa", ["__new__", *by_id], key="co_pick", on_change=co_select,
+                     format_func=lambda i: "➕ Nueva empresa" if i == "__new__" else by_id[i]["name"])
+        if st.session_state.get("co_msg"):
+            st.success(st.session_state.pop("co_msg"))
+        if st.session_state.get("co_msg_err"):
+            st.error(st.session_state.pop("co_msg_err"))
+
+        st.subheader("1. Estados financieros (opcional)")
+        st.caption("Sube la cuenta de resultados, el balance o ambos (Excel, CSV o PDF). Detecto las partidas por su nombre "
+                   "en español o inglés y la escala (miles, millones). Revisa siempre lo detectado.")
+        u1, u2 = st.columns([3, 1])
+        files = u1.file_uploader("Archivos", type=["xlsx", "xlsm", "csv", "pdf"], accept_multiple_files=True,
+                                 key=f"co_upload_{st.session_state['co_pick']}", label_visibility="collapsed")
+        u2.download_button("Descargar plantilla (CSV)", stm.TEMPLATE.to_csv(index=False).encode("utf-8-sig"),
+                           "plantilla_estados_financieros.csv", "text/csv", key="co_tpl")
+        if files:
+            results = []
+            for f in files:
+                try:
+                    results.append((f.name, stm.parse_statement(f.getvalue(), f.name)))
+                except Exception as e:  # noqa: BLE001 — archivo ilegible: se informa y se sigue con los demás
+                    st.error(f"{f.name}: no se pudo leer ({e}).")
+            for name, r in results:
+                for w in r.warnings:
+                    st.warning(f"{name}: {w}")
+            merged = stm.merge_results([r for _, r in results])
+            if not merged.empty:
+                fin = {str(y): {i: float(merged.loc[i, y]) for i in merged.index if pd.notna(merged.loc[i, y])} for y in merged.columns}
+                summary = stm.summarize(merged)
+                cur_detected = next((r.currency for _, r in results if r.currency), None)
+                with st.expander(f"Partidas detectadas ({sum(len(r.detections) for _, r in results)})", expanded=True):
+                    det = pd.DataFrame([{"Partida": ITEM_LABEL[d.item], "Año": str(d.year), "Texto en el archivo": d.label,
+                                         "Dónde": f"{n} · {d.where}", "Valor": d.value * (1 if d.item in stm.COUNT_ITEMS else r.scale)}
+                                        for n, r in results for d in r.detections])
+                    st.dataframe(det.sort_values(["Partida", "Año"]), hide_index=True, width="stretch",
+                                 column_config={"Valor": st.column_config.NumberColumn(format="localized")})
+                prev = {"revenue": "Ingresos", "growth": "Crecimiento", "current_margin": "Margen operativo", "net_margin": "Margen neto",
+                        "cash": "Caja", "debt": "Deuda", "burn": "Burn mensual (estimado)", "nol": "Pérdidas acumuladas", "employees": "Empleados"}
+                st.dataframe(pd.DataFrame([{"Campo": prev[k], "Valor": (fmt_pct(v) if k in ("growth", "current_margin", "net_margin")
+                                                                          else fmt_num(v, 0)), "Año": summary.get("year")}
+                                           for k, v in summary.items() if k in prev]), hide_index=True, width="stretch")
+                st.caption("Burn mensual estimado = flujo de caja operativo negativo / 12 (si no está, beneficio neto + amortización). "
+                           "Pérdidas acumuladas = suma de los resultados netos negativos de los años del archivo.")
+                st.button("Rellenar los campos con lo detectado", type="primary", key="co_fill_btn",
+                          on_click=co_fill, args=(summary, fin, [f.name for f in files], cur_detected))
+
+        st.subheader("2. Datos de la empresa")
+        a1, a2, a3, a4 = st.columns([3, 3, 2, 1])
+        a1.text_input("Nombre", key="co_name")
+        a2.selectbox("Industria", options, key="co_industry", format_func=lambda i: f"{i} · {sector_of[i]}")
+        a3.selectbox("Etapa", stages["stage_label"].tolist(), key="co_stage")
+        a4.selectbox("Moneda", ["USD", "EUR"], key="co_currency")
+        b = st.columns(4)
+        for i, (k, label) in enumerate(CO_MONEY):
+            b[i % 4].number_input(label, 0.0, None, step=50_000.0, format="%.0f", key=f"co_{k}")
+        p = st.columns(4)
+        p[0].number_input(CO_PCT[0][1], -100.0, 500.0, step=0.5, format="%.2f", key="co_growth")
+        p[1].number_input(CO_PCT[1][1], -1000.0, 90.0, step=0.5, format="%.2f", key="co_current_margin")
+        st.text_area("Notas", key="co_notes", height=80)
+
+        st.markdown("**Histórico financiero** (editable)")
+        fin_df = st.data_editor(_fin_to_editor(st.session_state.get("co_fin", {})), num_rows="dynamic", hide_index=True,
+                                width="stretch", key=f"co_fin_editor_{st.session_state.get('co_editor_v', 0)}",
+                                column_config={"Partida": st.column_config.SelectboxColumn("Partida", options=list(LABEL_ITEM), required=True)})
+        if st.session_state.get("co_files"):
+            st.caption("Archivos de origen: " + ", ".join(st.session_state["co_files"]) + " (solo se guardan las cifras, no los archivos).")
+
+        s1, s2, s3 = st.columns([1, 1, 1])
+        s1.button("💾 Guardar", type="primary", on_click=co_save, args=(fin_df,), key="co_save_btn")
+        s2.button("Guardar y cargar en el modelo", on_click=co_save, args=(fin_df, True), key="co_save_load_btn")
+        if st.session_state.get("co_pick") != "__new__":
+            s3.button("🗑️ Eliminar", on_click=co_delete, key="co_del_btn")
+
+        if lib:
+            st.subheader("Tu biblioteca")
+            st.dataframe(pd.DataFrame([{
+                "Empresa": c["name"], "Industria": c.get("industry"), "Etapa": c.get("stage"), "Moneda": c.get("currency"),
+                "Ingresos": fmt_num((c.get("inputs") or {}).get("revenue") or 0, 0),
+                "Crecimiento": fmt_pct((c.get("inputs") or {}).get("growth") or 0),
+                "Margen operativo": fmt_pct((c.get("inputs") or {}).get("current_margin") or 0),
+                "Actualizada": (c.get("updated_at") or "")[:10],
+            } for c in lib]), hide_index=True, width="stretch")
+            import json as _json
+            st.download_button("Exportar biblioteca (JSON)", _json.dumps(lib, ensure_ascii=False, indent=1).encode("utf-8"),
+                               "mis_empresas.json", "application/json", key="co_export",
+                               help="Copia de seguridad de tus empresas.")
 
 # ======================================================================= Fondos
 
