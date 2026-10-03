@@ -140,72 +140,27 @@ def company_store():
     return cs.get_store()
 
 
-@st.cache_resource(show_spinner=False)
-def accounts_store():
-    return cs.get_accounts()
+# Biblioteca compartida y sin cuentas (decisión del usuario): todos ven las mismas empresas.
+SHARED_OWNER = "compartida"
 
 
-def current_user() -> str | None:
-    return st.session_state.get("user")
+def current_user() -> str:
+    return SHARED_OWNER
 
 
 def my_companies() -> list[dict]:
-    """Biblioteca del usuario con sesión, cacheada en la sesión hasta que se guarda o borra algo."""
-    user = current_user()
-    if not user:
-        return []
-    if st.session_state.get("lib_owner") != user or "lib" not in st.session_state:
+    """Biblioteca compartida, cacheada en la sesión hasta que se guarda o borra algo."""
+    if "lib" not in st.session_state:
         try:
-            st.session_state["lib"] = company_store().list(user)
+            st.session_state["lib"] = company_store().list(SHARED_OWNER)
         except Exception as e:  # noqa: BLE001 — se muestra al usuario en lugar de romper la app
             st.session_state["lib"] = []
             st.session_state["lib_error"] = str(e)
-        st.session_state["lib_owner"] = user
     return st.session_state["lib"]
 
 
 def refresh_library() -> None:
     st.session_state.pop("lib", None)
-
-
-def do_login() -> None:
-    import time
-
-    blocked_until = st.session_state.get("login_blocked_until", 0)
-    if time.time() < blocked_until:
-        st.session_state["login_error"] = f"Demasiados intentos. Espera {int(blocked_until - time.time())} s."
-        st.session_state["login_pass"] = ""
-        return
-    u = cs.authenticate(accounts_store(), st.session_state.get("login_user", ""), st.session_state.get("login_pass", ""))
-    if u:
-        st.session_state["user"] = u
-        st.session_state.pop("login_error", None)
-        st.session_state["login_fails"] = 0
-        refresh_library()
-    else:
-        fails = st.session_state.get("login_fails", 0) + 1
-        st.session_state["login_fails"] = fails
-        st.session_state["login_error"] = "Usuario o contraseña incorrectos."
-        if fails >= 5:  # freno básico a la fuerza bruta desde una misma sesión
-            st.session_state["login_blocked_until"] = time.time() + 60
-            st.session_state["login_fails"] = 0
-    st.session_state["login_pass"] = ""
-
-
-def do_register() -> None:
-    try:
-        u = cs.register(accounts_store(), st.session_state.get("reg_user", ""), st.session_state.get("reg_pass", ""))
-        st.session_state["user"] = u
-        st.session_state.pop("login_error", None)
-        refresh_library()
-    except cs.AccountError as e:
-        st.session_state["login_error"] = str(e)
-    st.session_state["reg_pass"] = ""
-
-
-def do_logout() -> None:
-    for k in ("user", "lib", "lib_owner"):
-        st.session_state.pop(k, None)
 
 
 def load_company(company: dict) -> None:
@@ -216,12 +171,13 @@ def load_company(company: dict) -> None:
     money_keys = {"revenue": "rev0", "burn": "burn", "cash": "cash", "investment": "inv", "pre_money": "pre",
                   "debt": "debt", "nol": "nol"}
     for field, key in money_keys.items():
-        if inp.get(field) is not None:
+        # Inversión y pre-money a 0 = sin dato: no se cargan (la ronda exige importes positivos)
+        if inp.get(field) is not None and not (field in ("investment", "pre_money") and not inp[field]):
             st.session_state[key] = float(inp[field])
     for field, key in {"growth": "growth", "current_margin": "cm"}.items():
         if inp.get(field) is not None:
             st.session_state[key] = round(float(inp[field]) * 100, 2)
-    if inp.get("investment") is not None and inp.get("pre_money") is not None:
+    if inp.get("investment") and inp.get("pre_money"):
         st.session_state["solve_for"] = "Participación"
     if company.get("industry") in set(industries["industry_std"]):
         st.session_state["industry"] = company["industry"]
@@ -234,24 +190,6 @@ def load_company(company: dict) -> None:
 
 with st.sidebar:
     st.title("Valorador de Startups")
-
-    with st.expander(f"👤 {current_user()}" if current_user() else "👤 Cuenta: mis empresas", expanded=False):
-        if current_user():
-            st.caption("Tus empresas guardadas solo las ves tú.")
-            st.button("Cerrar sesión", on_click=do_logout, key="logout_btn")
-        else:
-            st.caption("Entra para guardar empresas y cargarlas en el modelo. La valoración funciona sin cuenta.")
-            mode = st.radio("Cuenta", ["Entrar", "Crear cuenta"], horizontal=True, label_visibility="collapsed", key="acc_mode")
-            if mode == "Entrar":
-                st.text_input("Usuario", key="login_user")
-                st.text_input("Contraseña", type="password", key="login_pass")
-                st.button("Entrar", on_click=do_login, type="primary", key="login_btn")
-            else:
-                st.text_input("Usuario nuevo", key="reg_user", help="3 a 32 caracteres: letras, números, punto, guion o guion bajo.")
-                st.text_input("Contraseña", type="password", key="reg_pass", help="Mínimo 6 caracteres. Se guarda cifrada.")
-                st.button("Crear cuenta y entrar", on_click=do_register, type="primary", key="reg_btn")
-            if st.session_state.get("login_error"):
-                st.error(st.session_state["login_error"])
 
     lib = my_companies()
     if lib:
@@ -1114,104 +1052,102 @@ def co_delete() -> None:
 
 
 with T["Mis empresas"]:
-    if not current_user():
-        st.info("Entra o crea una cuenta en la barra lateral (👤 Cuenta) para guardar empresas. "
-                "Cada usuario solo ve sus propias empresas.")
-    else:
-        if st.session_state.get("lib_error"):
-            st.error(f"No se pudo leer la biblioteca: {st.session_state.pop('lib_error')}")
-        lib = my_companies()
-        by_id = {c["id"]: c for c in lib}
-        if "co_pick" not in st.session_state or (st.session_state["co_pick"] != "__new__" and st.session_state["co_pick"] not in by_id):
-            st.session_state["co_pick"] = "__new__"
-        if "co_name" not in st.session_state:
-            co_select()
-        st.selectbox("Empresa", ["__new__", *by_id], key="co_pick", on_change=co_select,
-                     format_func=lambda i: "➕ Nueva empresa" if i == "__new__" else by_id[i]["name"])
-        if st.session_state.get("co_msg"):
-            st.success(st.session_state.pop("co_msg"))
-        if st.session_state.get("co_msg_err"):
-            st.error(st.session_state.pop("co_msg_err"))
+    st.warning("Biblioteca **compartida y sin contraseña**: cualquiera con el enlace de la app puede ver, editar y "
+               "borrar estas empresas. No guardes datos confidenciales.", icon="⚠️")
+    if st.session_state.get("lib_error"):
+        st.error(f"No se pudo leer la biblioteca: {st.session_state.pop('lib_error')}")
+    lib = my_companies()
+    by_id = {c["id"]: c for c in lib}
+    if "co_pick" not in st.session_state or (st.session_state["co_pick"] != "__new__" and st.session_state["co_pick"] not in by_id):
+        st.session_state["co_pick"] = "__new__"
+    if "co_name" not in st.session_state:
+        co_select()
+    st.selectbox("Empresa", ["__new__", *by_id], key="co_pick", on_change=co_select,
+                 format_func=lambda i: "➕ Nueva empresa" if i == "__new__" else by_id[i]["name"])
+    if st.session_state.get("co_msg"):
+        st.success(st.session_state.pop("co_msg"))
+    if st.session_state.get("co_msg_err"):
+        st.error(st.session_state.pop("co_msg_err"))
 
-        st.subheader("1. Estados financieros (opcional)")
-        st.caption("Sube la cuenta de resultados, el balance o ambos (Excel, CSV o PDF). Detecto las partidas por su nombre "
-                   "en español o inglés y la escala (miles, millones). Revisa siempre lo detectado.")
-        u1, u2 = st.columns([3, 1])
-        files = u1.file_uploader("Archivos", type=["xlsx", "xlsm", "csv", "pdf"], accept_multiple_files=True,
-                                 key=f"co_upload_{st.session_state['co_pick']}", label_visibility="collapsed")
-        u2.download_button("Descargar plantilla (CSV)", stm.TEMPLATE.to_csv(index=False).encode("utf-8-sig"),
-                           "plantilla_estados_financieros.csv", "text/csv", key="co_tpl")
-        if files:
-            results = []
-            for f in files:
-                try:
-                    results.append((f.name, stm.parse_statement(f.getvalue(), f.name)))
-                except Exception as e:  # noqa: BLE001 — archivo ilegible: se informa y se sigue con los demás
-                    st.error(f"{f.name}: no se pudo leer ({e}).")
-            for name, r in results:
-                for w in r.warnings:
-                    st.warning(f"{name}: {w}")
-            merged = stm.merge_results([r for _, r in results])
-            if not merged.empty:
-                fin = {str(y): {i: float(merged.loc[i, y]) for i in merged.index if pd.notna(merged.loc[i, y])} for y in merged.columns}
-                summary = stm.summarize(merged)
-                cur_detected = next((r.currency for _, r in results if r.currency), None)
-                with st.expander(f"Partidas detectadas ({sum(len(r.detections) for _, r in results)})", expanded=True):
-                    det = pd.DataFrame([{"Partida": ITEM_LABEL[d.item], "Año": str(d.year), "Texto en el archivo": d.label,
-                                         "Dónde": f"{n} · {d.where}", "Valor": d.value * (1 if d.item in stm.COUNT_ITEMS else r.scale)}
-                                        for n, r in results for d in r.detections])
-                    st.dataframe(det.sort_values(["Partida", "Año"]), hide_index=True, width="stretch",
-                                 column_config={"Valor": st.column_config.NumberColumn(format="localized")})
-                prev = {"revenue": "Ingresos", "growth": "Crecimiento", "current_margin": "Margen operativo", "net_margin": "Margen neto",
-                        "cash": "Caja", "debt": "Deuda", "burn": "Burn mensual (estimado)", "nol": "Pérdidas acumuladas", "employees": "Empleados"}
-                st.dataframe(pd.DataFrame([{"Campo": prev[k], "Valor": (fmt_pct(v) if k in ("growth", "current_margin", "net_margin")
-                                                                          else fmt_num(v, 0)), "Año": summary.get("year")}
-                                           for k, v in summary.items() if k in prev]), hide_index=True, width="stretch")
-                st.caption("Burn mensual estimado = flujo de caja operativo negativo / 12 (si no está, beneficio neto + amortización). "
-                           "Pérdidas acumuladas = suma de los resultados netos negativos de los años del archivo.")
-                st.button("Rellenar los campos con lo detectado", type="primary", key="co_fill_btn",
-                          on_click=co_fill, args=(summary, fin, [f.name for f in files], cur_detected))
+    st.subheader("1. Estados financieros (opcional)")
+    st.caption("Sube la cuenta de resultados, el balance o ambos (Excel, CSV o PDF). Detecto las partidas por su nombre "
+               "en español o inglés y la escala (miles, millones). Revisa siempre lo detectado.")
+    u1, u2 = st.columns([3, 1])
+    files = u1.file_uploader("Archivos", type=["xlsx", "xlsm", "csv", "pdf"], accept_multiple_files=True,
+                             key=f"co_upload_{st.session_state['co_pick']}", label_visibility="collapsed")
+    u2.download_button("Descargar plantilla (CSV)", stm.TEMPLATE.to_csv(index=False).encode("utf-8-sig"),
+                       "plantilla_estados_financieros.csv", "text/csv", key="co_tpl")
+    if files:
+        results = []
+        for f in files:
+            try:
+                results.append((f.name, stm.parse_statement(f.getvalue(), f.name)))
+            except Exception as e:  # noqa: BLE001 — archivo ilegible: se informa y se sigue con los demás
+                st.error(f"{f.name}: no se pudo leer ({e}).")
+        for name, r in results:
+            for w in r.warnings:
+                st.warning(f"{name}: {w}")
+        merged = stm.merge_results([r for _, r in results])
+        if not merged.empty:
+            fin = {str(y): {i: float(merged.loc[i, y]) for i in merged.index if pd.notna(merged.loc[i, y])} for y in merged.columns}
+            summary = stm.summarize(merged)
+            cur_detected = next((r.currency for _, r in results if r.currency), None)
+            with st.expander(f"Partidas detectadas ({sum(len(r.detections) for _, r in results)})", expanded=True):
+                det = pd.DataFrame([{"Partida": ITEM_LABEL[d.item], "Año": str(d.year), "Texto en el archivo": d.label,
+                                     "Dónde": f"{n} · {d.where}", "Valor": d.value * (1 if d.item in stm.COUNT_ITEMS else r.scale)}
+                                    for n, r in results for d in r.detections])
+                st.dataframe(det.sort_values(["Partida", "Año"]), hide_index=True, width="stretch",
+                             column_config={"Valor": st.column_config.NumberColumn(format="localized")})
+            prev = {"revenue": "Ingresos", "growth": "Crecimiento", "current_margin": "Margen operativo", "net_margin": "Margen neto",
+                    "cash": "Caja", "debt": "Deuda", "burn": "Burn mensual (estimado)", "nol": "Pérdidas acumuladas", "employees": "Empleados"}
+            st.dataframe(pd.DataFrame([{"Campo": prev[k], "Valor": (fmt_pct(v) if k in ("growth", "current_margin", "net_margin")
+                                                                      else fmt_num(v, 0)), "Año": summary.get("year")}
+                                       for k, v in summary.items() if k in prev]), hide_index=True, width="stretch")
+            st.caption("Burn mensual estimado = flujo de caja operativo negativo / 12 (si no está, beneficio neto + amortización). "
+                       "Pérdidas acumuladas = suma de los resultados netos negativos de los años del archivo.")
+            st.button("Rellenar los campos con lo detectado", type="primary", key="co_fill_btn",
+                      on_click=co_fill, args=(summary, fin, [f.name for f in files], cur_detected))
 
-        st.subheader("2. Datos de la empresa")
-        a1, a2, a3, a4 = st.columns([3, 3, 2, 1])
-        a1.text_input("Nombre", key="co_name")
-        a2.selectbox("Industria", options, key="co_industry", format_func=lambda i: f"{i} · {sector_of[i]}")
-        a3.selectbox("Etapa", stages["stage_label"].tolist(), key="co_stage")
-        a4.selectbox("Moneda", ["USD", "EUR"], key="co_currency")
-        b = st.columns(4)
-        for i, (k, label) in enumerate(CO_MONEY):
-            b[i % 4].number_input(label, 0.0, None, step=50_000.0, format="%.0f", key=f"co_{k}")
-        p = st.columns(4)
-        p[0].number_input(CO_PCT[0][1], -100.0, 500.0, step=0.5, format="%.2f", key="co_growth")
-        p[1].number_input(CO_PCT[1][1], -1000.0, 90.0, step=0.5, format="%.2f", key="co_current_margin")
-        st.text_area("Notas", key="co_notes", height=80)
+    st.subheader("2. Datos de la empresa")
+    a1, a2, a3, a4 = st.columns([3, 3, 2, 1])
+    a1.text_input("Nombre", key="co_name")
+    a2.selectbox("Industria", options, key="co_industry", format_func=lambda i: f"{i} · {sector_of[i]}")
+    a3.selectbox("Etapa", stages["stage_label"].tolist(), key="co_stage")
+    a4.selectbox("Moneda", ["USD", "EUR"], key="co_currency")
+    b = st.columns(4)
+    for i, (k, label) in enumerate(CO_MONEY):
+        b[i % 4].number_input(label, 0.0, None, step=50_000.0, format="%.0f", key=f"co_{k}")
+    p = st.columns(4)
+    p[0].number_input(CO_PCT[0][1], -100.0, 500.0, step=0.5, format="%.2f", key="co_growth")
+    p[1].number_input(CO_PCT[1][1], -1000.0, 90.0, step=0.5, format="%.2f", key="co_current_margin")
+    st.text_area("Notas", key="co_notes", height=80)
 
-        st.markdown("**Histórico financiero** (editable)")
-        fin_df = st.data_editor(_fin_to_editor(st.session_state.get("co_fin", {})), num_rows="dynamic", hide_index=True,
-                                width="stretch", key=f"co_fin_editor_{st.session_state.get('co_editor_v', 0)}",
-                                column_config={"Partida": st.column_config.SelectboxColumn("Partida", options=list(LABEL_ITEM), required=True)})
-        if st.session_state.get("co_files"):
-            st.caption("Archivos de origen: " + ", ".join(st.session_state["co_files"]) + " (solo se guardan las cifras, no los archivos).")
+    st.markdown("**Histórico financiero** (editable)")
+    fin_df = st.data_editor(_fin_to_editor(st.session_state.get("co_fin", {})), num_rows="dynamic", hide_index=True,
+                            width="stretch", key=f"co_fin_editor_{st.session_state.get('co_editor_v', 0)}",
+                            column_config={"Partida": st.column_config.SelectboxColumn("Partida", options=list(LABEL_ITEM), required=True)})
+    if st.session_state.get("co_files"):
+        st.caption("Archivos de origen: " + ", ".join(st.session_state["co_files"]) + " (solo se guardan las cifras, no los archivos).")
 
-        s1, s2, s3 = st.columns([1, 1, 1])
-        s1.button("💾 Guardar", type="primary", on_click=co_save, args=(fin_df,), key="co_save_btn")
-        s2.button("Guardar y cargar en el modelo", on_click=co_save, args=(fin_df, True), key="co_save_load_btn")
-        if st.session_state.get("co_pick") != "__new__":
-            s3.button("🗑️ Eliminar", on_click=co_delete, key="co_del_btn")
+    s1, s2, s3 = st.columns([1, 1, 1])
+    s1.button("💾 Guardar", type="primary", on_click=co_save, args=(fin_df,), key="co_save_btn")
+    s2.button("Guardar y cargar en el modelo", on_click=co_save, args=(fin_df, True), key="co_save_load_btn")
+    if st.session_state.get("co_pick") != "__new__":
+        s3.button("🗑️ Eliminar", on_click=co_delete, key="co_del_btn")
 
-        if lib:
-            st.subheader("Tu biblioteca")
-            st.dataframe(pd.DataFrame([{
-                "Empresa": c["name"], "Industria": c.get("industry"), "Etapa": c.get("stage"), "Moneda": c.get("currency"),
-                "Ingresos": fmt_num((c.get("inputs") or {}).get("revenue") or 0, 0),
-                "Crecimiento": fmt_pct((c.get("inputs") or {}).get("growth") or 0),
-                "Margen operativo": fmt_pct((c.get("inputs") or {}).get("current_margin") or 0),
-                "Actualizada": (c.get("updated_at") or "")[:10],
-            } for c in lib]), hide_index=True, width="stretch")
-            import json as _json
-            st.download_button("Exportar biblioteca (JSON)", _json.dumps(lib, ensure_ascii=False, indent=1).encode("utf-8"),
-                               "mis_empresas.json", "application/json", key="co_export",
-                               help="Copia de seguridad de tus empresas.")
+    if lib:
+        st.subheader("Tu biblioteca")
+        st.dataframe(pd.DataFrame([{
+            "Empresa": c["name"], "Industria": c.get("industry"), "Etapa": c.get("stage"), "Moneda": c.get("currency"),
+            "Ingresos": fmt_num((c.get("inputs") or {}).get("revenue") or 0, 0),
+            "Crecimiento": fmt_pct((c.get("inputs") or {}).get("growth") or 0),
+            "Margen operativo": fmt_pct((c.get("inputs") or {}).get("current_margin") or 0),
+            "Actualizada": (c.get("updated_at") or "")[:10],
+        } for c in lib]), hide_index=True, width="stretch")
+        import json as _json
+        st.download_button("Exportar biblioteca (JSON)", _json.dumps(lib, ensure_ascii=False, indent=1).encode("utf-8"),
+                           "mis_empresas.json", "application/json", key="co_export",
+                           help="Copia de seguridad de tus empresas.")
 
 # ======================================================================= Fondos
 

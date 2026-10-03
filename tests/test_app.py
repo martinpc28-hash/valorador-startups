@@ -13,7 +13,8 @@ def run(**changes) -> AppTest:
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
     for label, value in changes.items():
-        widget = next(w for w in [*at.selectbox, *at.radio] if w.label == label)
+        # La barra lateral primero: "Industria" y "Etapa" también existen en el formulario de Mis empresas
+        widget = next(w for w in [*at.sidebar.selectbox, *at.sidebar.radio, *at.selectbox, *at.radio] if w.label == label)
         widget.set_value(value)
     if changes:
         at.run()
@@ -75,7 +76,7 @@ def test_comparables_sources_and_fund_tab_render():
     assert any(m.label.startswith("TVPI") for m in at.metric)
 
 
-def test_account_save_company_and_load_into_model(tmp_path, monkeypatch):
+def test_save_company_and_load_into_model(tmp_path, monkeypatch):
     monkeypatch.setenv("VALORADOR_STORE", "local")
     monkeypatch.setenv("VALORADOR_LOCAL_DIR", str(tmp_path))
     import importlib
@@ -85,23 +86,20 @@ def test_account_save_company_and_load_into_model(tmp_path, monkeypatch):
 
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
-    next(r for r in at.radio if r.label == "Cuenta").set_value("Crear cuenta")
-    at.run()
-    next(t for t in at.text_input if t.label == "Usuario nuevo").input("tester")
-    next(t for t in at.text_input if t.label == "Contraseña").input("clave-segura")
-    at.run()
-    next(b for b in at.button if b.label == "Crear cuenta y entrar").click()
-    at.run()
-    assert at.session_state["user"] == "tester"
-
+    assert any("compartida" in w.value for w in at.warning)  # aviso de biblioteca sin contraseña
     next(t for t in at.text_input if t.label == "Nombre").input("Mi Startup")
     next(n for n in at.number_input if n.label == "Ingresos últimos 12 meses").set_value(4_000_000.0)
     at.run()
     next(b for b in at.button if b.label == "Guardar y cargar en el modelo").click()
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    assert [c["name"] for c in store_mod.LocalStore(tmp_path).list("tester")] == ["Mi Startup"]
+    assert [c["name"] for c in store_mod.LocalStore(tmp_path).list("compartida")] == ["Mi Startup"]
     assert next(n for n in at.number_input if n.label.startswith("Ingresos últimos 12 meses (")).value == 4_000_000.0
+    assert any(s.label == "Cargar empresa guardada" for s in at.selectbox)
+    # Sin inversión ni pre-money guardadas, cargar la empresa no rompe la ronda
+    next(b for b in at.button if b.label == "Cargar en el modelo").click()
+    at.run()
+    assert not at.exception and not at.error, [e.value for e in at.error]
 
 
 def test_vc_survival_mode_and_ebitda_exit():

@@ -19,7 +19,7 @@ Aplicación web (Streamlit) que valora una startup a partir de las variables que
 | **Monte Carlo** | 10.000 simulaciones con semilla fija. Crecimiento, margen y múltiplo correlacionados; fracaso simulado; P10/P50/P90 y probabilidad de alcanzar un MOIC objetivo |
 | **Caja y ronda** | Runway, caja mensual, capital que consume el plan y dilución adicional implícita |
 | **Comparables SEC** | Buscador de empresas reales en Form D (rondas privadas), Form C (startups con estados financieros) y S-1 (salidas a bolsa). Filtros por nombre, industria y antigüedad. Al seleccionar una o varias se comparan con tu startup y se ve en qué percentil queda tu ronda o tus ingresos. Un botón **precarga** los datos de la empresa elegida en el modelo |
-| **Mis empresas** | Biblioteca personal (usuario y contraseña propios de la app). Creas plantillas de empresas y subes sus estados financieros en Excel, CSV o PDF. La app detecta las partidas en español o inglés (ingresos, EBIT, beneficio neto, caja, deuda, flujo operativo, empleados) y la escala, y rellena ingresos, crecimiento, margen, caja, deuda, burn estimado y pérdidas acumuladas. Revisas, guardas, y desde la barra lateral la cargas en el modelo o la añades a la comparación |
+| **Mis empresas** | Biblioteca **compartida y sin contraseña** (por ahora todos los visitantes ven las mismas empresas; no guardes datos confidenciales). Creas plantillas de empresas y subes sus estados financieros en Excel, CSV o PDF. La app detecta las partidas en español o inglés (ingresos, EBIT, beneficio neto, caja, deuda, flujo operativo, empleados) y la escala, y rellena ingresos, crecimiento, margen, caja, deuda, burn estimado y pérdidas acumuladas. Revisas, guardas, y desde la barra lateral la cargas en el modelo o la añades a la comparación |
 | **Fondos** | Métricas de un fondo de VC (DPI, RVPI, TVPI, MOIC e IRR con XIRR propio), curva J, proyección tipo Takahashi-Alexander y tamaño frente a los vehículos de VC que presentaron Form D. Flujos editables o cargados desde CSV |
 | **Supuestos** | Tabla editable por etapa: IRR objetivo, supervivencia, dilución, iliquidez |
 | **Datos y fuentes** | Cada número usado con su fuente, fecha, URL y avisos (reemplazos y recortes) |
@@ -145,7 +145,7 @@ src/montecarlo.py      simulación
 src/fund.py            métricas de fondos: DPI, RVPI, TVPI, XIRR, curva J, proyección
 src/comparables.py     empresas de la SEC: búsqueda, comparación y precarga
 src/statements.py      lectura de estados financieros (Excel, CSV, PDF)
-src/company_store.py   cuentas (hash PBKDF2) y biblioteca de empresas (Firestore o archivo local)
+src/company_store.py   biblioteca de empresas (Firestore o archivo local)
 src/charts.py          gráficos y formato de números
 data/                  CSV con procedencia
 scripts/               un script por fuente
