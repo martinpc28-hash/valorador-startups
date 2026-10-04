@@ -332,7 +332,17 @@ def _sec_range(dataset: str) -> str:
         return "n/d"
 
 
-with T["Read Me"]:
+with T["Read Me"], st.container(key="readme"):
+    # Texto justificado solo en el Read Me: el contenedor con key genera la clase .st-key-readme
+    st.markdown(
+        """<style>
+        .st-key-readme [data-testid="stMarkdownContainer"] p,
+        .st-key-readme [data-testid="stMarkdownContainer"] li {
+            text-align: justify; text-justify: inter-word; hyphens: auto;
+        }
+        </style>""",
+        unsafe_allow_html=True,
+    )
     damo_date = D["metrics"][D["metrics"]["source"] == "damodaran"]["as_of"].iloc[0]
     st.header("Cómo funciona el Valorador de Startups")
     st.markdown(
@@ -349,7 +359,7 @@ with T["Read Me"]:
         "2. Introduce los datos de la empresa: ingresos, crecimiento, margen, burn rate y caja.\n"
         "3. Introduce la ronda: dos de estos tres datos (inversión, pre-money o participación) y la app calcula el tercero.\n"
         "4. Mira el veredicto en **Resumen** y entra en cada pestaña para ver el detalle.\n"
-        "5. Si quieres, guarda la empresa en **Mis empresas** o compárala con empresas reales en **Comparables SEC**."
+        "5. Si quieres, guarda la empresa en **Mis empresas** o compárala con empresas reales en **Comparables**."
     )
 
     st.subheader("Las pestañas")
