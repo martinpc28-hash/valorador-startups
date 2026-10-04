@@ -97,6 +97,14 @@ def test_dcf_survival_adjustment():
     assert r.equity_value == pytest.approx(0.4 * 150.0 + 10.0)
 
 
+def test_dcf_equity_has_limited_liability_floor():
+    # Margen siempre negativo: el valor operativo es negativo, pero el equity no baja de 0
+    r = dcf(_base(current_margin=-0.5, target_margin=-0.5))
+    assert r.operating_value < 0
+    assert r.equity_value == 0
+    assert any("responsabilidad limitada" in w for w in r.warnings)
+
+
 def test_dcf_reinvestment_uses_sales_to_capital():
     r = dcf(_base(growth_high=0.10, stable_growth=0.02))
     proj = r.projection

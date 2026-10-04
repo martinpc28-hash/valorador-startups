@@ -185,6 +185,11 @@ def load_company(company: dict) -> None:
             st.session_state[key] = round(float(inp[field]) * 100, 2)
         else:
             kept.append(labels[field])
+    for k in [k for k in st.session_state if str(k).startswith("tm_") and k != "tm_override"]:
+        del st.session_state[k]  # sin margen propio, vuelve el de la industria (no el de la empresa anterior)
+    if inp.get("target_margin") is not None:
+        # se aplica al dibujar el widget (su clave depende de la industria, que se fija aquí mismo)
+        st.session_state["tm_override"] = float(inp["target_margin"])
     if inp.get("investment") and inp.get("pre_money"):
         st.session_state["solve_for"] = "Participación"
     if company.get("industry") in set(industries["industry_std"]):
@@ -571,7 +576,10 @@ if missing:
 
 # Valores de industria que el usuario puede sustituir
 with st.sidebar, st.expander("Supuestos anclados en la industria"):
-    target_margin = pct_input("Margen operativo objetivo (%)", R["operating_margin"].value, f"tm_{industry}_{apply_caps}",
+    tm_key = f"tm_{industry}_{apply_caps}"
+    if "tm_override" in st.session_state:  # margen objetivo propio de la empresa cargada
+        st.session_state[tm_key] = round(st.session_state.pop("tm_override") * 100, 2)
+    target_margin = pct_input("Margen operativo objetivo (%)", R["operating_margin"].value, tm_key,
                               -100.0, 90.0, help="Por defecto, margen operativo de la industria.\n\n" + R["operating_margin"].provenance())
     margin_year = st.slider("Año en que se alcanza el margen objetivo", 2, 10, 7)
     s2c = st.number_input("Ventas / capital invertido", 0.05, 20.0, float(round(R["sales_to_capital"].value, 2)), 0.05,
@@ -753,7 +761,7 @@ with T["Resumen"]:
            formula=f"pre-money = post-money − inversión = {fmt_money(terms.post_money, currency)} − {fmt_money(terms.investment, currency)}. "
                    f"Participación = inversión / post-money = {fmt_pct(terms.stake)}")
     metric(c[1], "DCF (equity)", fmt_money(dcf_res.equity_value, currency),
-           formula=f"equity = p × valor operativo + (1 − p) × recuperación × valor operativo + caja − deuda, con p = "
+           formula=f"equity = máx(p × valor operativo + (1 − p) × recuperación × valor operativo + caja − deuda, 0), con p = "
                    f"{fmt_pct(base.survival_prob)} y valor operativo = {fmt_money(dcf_res.operating_value, currency)}",
            help="Valor esperado con probabilidad de supervivencia. Detalle en la pestaña DCF.")
     metric(c[2], "Método VC (pre-money)", fmt_money(vc_res.pre_money, currency),
@@ -821,8 +829,9 @@ with T["DCF"]:
                    f"y recuperación = {fmt_pct(base.distress_proceeds)}",
            help="p es la probabilidad de supervivencia de la etapa (pestaña Supuestos).")
     metric(c[4], "Valor del equity", fmt_money(dcf_res.equity_value, currency),
-           formula=f"valor ajustado + caja − deuda = {fmt_money(dcf_res.survival_adjusted_value, currency)} + "
-                   f"{fmt_money(cash, currency)} − {fmt_money(debt, currency)}")
+           formula=f"máx(valor ajustado + caja − deuda, 0) = máx({fmt_money(dcf_res.survival_adjusted_value, currency)} + "
+                   f"{fmt_money(cash, currency)} − {fmt_money(debt, currency)}, 0)",
+           help="Con suelo en 0: responsabilidad limitada, el accionista no pierde más de lo invertido.")
 
     g1, g2 = st.columns(2)
     sc, unit = ch.money_scale(proj["Ingresos"])
@@ -1425,6 +1434,8 @@ def co_select() -> None:
         st.session_state[f"co_{k}"] = float(inp.get(k) or 0.0)
     for k, _ in CO_PCT:
         st.session_state[f"co_{k}"] = round(float(inp.get(k) or 0.0) * 100, 2)
+    tm = inp.get("target_margin")
+    st.session_state["co_target_margin"] = round(float(tm) * 100, 2) if tm is not None else None
     st.session_state["co_fin"] = c.get("financials", {})
     st.session_state["co_files"] = c.get("source_files", [])
     st.session_state["co_editor_v"] = st.session_state.get("co_editor_v", 0) + 1
@@ -1453,7 +1464,10 @@ def co_collect(fin_df: pd.DataFrame) -> dict:
          "stage": st.session_state.get("co_stage"), "currency": st.session_state.get("co_currency"),
          "notes": st.session_state.get("co_notes", ""),
          "inputs": {**{k: st.session_state.get(f"co_{k}") for k, _ in CO_MONEY},
-                    **{k: (st.session_state.get(f"co_{k}") or 0) / 100 for k, _ in CO_PCT}},
+                    **{k: (st.session_state.get(f"co_{k}") or 0) / 100 for k, _ in CO_PCT},
+                    # opcional: vacío = se usa el margen de la industria
+                    "target_margin": (st.session_state["co_target_margin"] / 100
+                                      if st.session_state.get("co_target_margin") is not None else None)},
          "financials": _editor_to_fin(fin_df), "source_files": st.session_state.get("co_files", [])}
     return {k: v for k, v in c.items() if v is not None or k != "id"}
 
@@ -1561,6 +1575,9 @@ with T["Mis empresas"]:
     p = st.columns(4)
     p[0].number_input(CO_PCT[0][1], -100.0, 500.0, step=0.5, format="%.2f", key="co_growth")
     p[1].number_input(CO_PCT[1][1], -1000.0, 90.0, step=0.5, format="%.2f", key="co_current_margin")
+    p[2].number_input("Margen operativo objetivo (%), opcional", -100.0, 90.0, step=0.5, format="%.2f", key="co_target_margin",
+                      help="Margen al que converge el DCF. Vacío: se usa el de la industria. Útil si la empresa se parece "
+                           "más a otra industria (por ejemplo, un SaaS clasificado como Software (Internet)).")
     st.text_area("Notas", key="co_notes", height=80)
 
     with st.expander("Histórico financiero por año (editable, opcional)", expanded=bool(st.session_state.get("co_fin"))):

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from src.valuation import DCFInputs, apply_survival, dcf_vectorized
+from src.valuation import DCFInputs, apply_survival, dcf_vectorized, equity_floor
 
 
 @dataclass
@@ -86,7 +86,7 @@ def simulate(
     else:
         survived = np.ones(settings.n_sims, dtype=bool)
         op = out["operating_value"]
-    equity = op + base.cash - base.debt
+    equity = equity_floor(op + base.cash - base.debt)  # responsabilidad limitada: nunca menos de 0
 
     year_idx = min(max(exit_year, 1), base.years) - 1
     exit_value = out["revenue"][:, year_idx] * multiple

@@ -126,6 +126,33 @@ def test_active_company_survives_new_session_via_url(tmp_path, monkeypatch):
     assert at.session_state["rev0"] == 2_500_000.0
 
 
+def test_company_target_margin_overrides_industry_and_resets(tmp_path, monkeypatch):
+    monkeypatch.setenv("VALORADOR_STORE", "local")
+    monkeypatch.setenv("VALORADOR_LOCAL_DIR", str(tmp_path))
+    import src.company_store as store_mod
+
+    store = store_mod.LocalStore(tmp_path)
+    a = {**store_mod.new_company("Con margen"), "id": "con-margen", "industry": "Software (Internet)",
+         "inputs": {"revenue": 5e6, "target_margin": 0.30}}
+    b = {**store_mod.new_company("Sin margen"), "id": "sin-margen", "industry": "Software (Internet)",
+         "inputs": {"revenue": 6e6}}
+    store.save("compartida", a)
+    store.save("compartida", b)
+
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.query_params["empresa"] = "con-margen"
+    at.run()
+    tm = next(n for n in at.number_input if n.label == "Margen operativo objetivo (%)")
+    assert tm.value == 30.0
+    at.session_state["lib_pick"] = "sin-margen"
+    at.run()
+    next(b_ for b_ in at.button if b_.label == "Cargar en el modelo").click()
+    at.run()
+    tm = next(n for n in at.number_input if n.label == "Margen operativo objetivo (%)")
+    assert tm.value != 30.0  # vuelve al margen de la industria
+    assert not at.exception
+
+
 def test_every_metric_tooltip_shows_its_formula():
     """Cada cifra calculada (tarjeta st.metric) explica en su ? con qué fórmula se obtuvo."""
     at = run()

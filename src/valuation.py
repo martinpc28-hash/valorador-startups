@@ -211,6 +211,11 @@ def dcf_vectorized(
     }
 
 
+def equity_floor(value):
+    """Responsabilidad limitada: el equity no vale menos de 0 (escalar o array)."""
+    return np.maximum(value, 0.0) if isinstance(value, np.ndarray) else max(float(value), 0.0)
+
+
 def apply_survival(operating_value, survival_prob, distress_proceeds: float = 0.0):
     """Valor esperado = p · valor en marcha + (1 − p) · valor de liquidación."""
     return survival_prob * operating_value + (1.0 - survival_prob) * distress_proceeds * np.maximum(operating_value, 0.0)
@@ -242,6 +247,12 @@ def dcf(inp: DCFInputs) -> DCFResult:
     g_used = float(out["stable_growth"][0])
 
     warnings = []
+    if adj + inp.cash - inp.debt < 0:
+        warnings.append(
+            "El valor del DCF es negativo: el plan consume más caja de la que genera. "
+            "El equity se limita a 0, porque un accionista no puede perder más de lo invertido (responsabilidad limitada). "
+            "Revisa el margen objetivo y el ratio ventas / capital."
+        )
     if inp.stable_growth > inp.risk_free:
         warnings.append(
             f"El crecimiento estable ({inp.stable_growth:.2%}) supera la tasa libre de riesgo; "
@@ -259,7 +270,7 @@ def dcf(inp: DCFInputs) -> DCFResult:
         pv_terminal=float(out["pv_terminal"][0]),
         operating_value=op_value,
         survival_adjusted_value=adj,
-        equity_value=adj + inp.cash - inp.debt,
+        equity_value=equity_floor(adj + inp.cash - inp.debt),
         stable_growth_used=g_used,
         capital_need=float(out["capital_need"][0]),
         warnings=warnings,
