@@ -1583,3 +1583,8 @@ st.caption(
     "Herramienta educativa y de análisis. **No constituye asesoramiento de inversión.** "
     "Los resultados dependen de supuestos que el usuario debe revisar."
 )
+st.markdown(
+    "Hecho por **Martín Pinzón** · [X (Twitter) @martinpinzon28](https://x.com/martinpinzon28) · "
+    "[LinkedIn](https://www.linkedin.com/in/mart%C3%ADn-alonso-pinz%C3%B3n-cede%C3%B1o-59128215a) · "
+    "[GitHub](https://github.com/martinpc28-hash)"
+)
