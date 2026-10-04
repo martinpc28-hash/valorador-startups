@@ -36,7 +36,7 @@ def test_changing_industry_stage_currency_updates_results():
     base = run()
     other = run(**{"Industria": "Drugs (Biotechnology)", "Etapa": "Semilla", "Moneda base": "EUR"})
     assert metric_value(base, "DCF (equity)") != metric_value(other, "DCF (equity)")
-    assert any("Semilla" in c.value for c in other.caption)
+    assert any("Etapa Semilla" in m.value for m in other.markdown)
 
 
 INDUSTRIES = pd.read_csv(DATA / "industry_crosswalk.csv").query("source == 'damodaran' and is_reference == False")["industry_std"].tolist()
@@ -62,7 +62,7 @@ def test_prefill_values_flow_into_the_model():
     at.session_state["industry"] = "Drugs (Biotechnology)"
     at.run()
     assert not at.exception
-    assert any("Drugs (Biotechnology)" in c.value for c in at.caption)
+    assert any("Drugs (Biotechnology)" in m.value for m in at.markdown)
     assert metric_value(at, "DCF (equity)") != before
 
 

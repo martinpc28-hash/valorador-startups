@@ -227,7 +227,7 @@ def clear_active() -> None:
 
 
 with st.sidebar:
-    st.title("Valorador de Startups")
+    st.subheader("📈 Valorador de Startups")
     st.caption("Rellena los pasos 1 a 3. Todo se recalcula al instante; el veredicto está en la pestaña **Resumen**.")
     if st.session_state.get("prefill_msg"):
         msg = f"Datos precargados de {st.session_state.pop('prefill_msg').rstrip('.')}. Revísalos antes de usarlos."
@@ -343,7 +343,10 @@ with st.sidebar:
 # ======================================================================= pestañas (controles primero)
 
 st.title("Valorador de Startups")
-st.caption(f"{industry} · {sector_of[industry]} · etapa {stage_label} · moneda {currency}")
+_active = next((c["name"] for c in my_companies() if c["id"] == st.session_state.get("active_company")), None)
+_chips = [f":blue-badge[{industry}]", f":gray-badge[{sector_of[industry]}]", f":gray-badge[Etapa {stage_label}]",
+          f":gray-badge[{currency}]"] + ([f":green-badge[🏢 {_active}]"] if _active else [])
+st.markdown(" ".join(_chips))
 warn_box = st.container()
 
 tab_names = ["Read Me", "Resumen", "DCF", "Método VC", "Múltiplos", "Escenarios", "Monte Carlo", "Caja y ronda",
@@ -740,7 +743,7 @@ def metric(col, label: str, value: str, res=None, help: str | None = None, delta
     h = "\n\n".join(x for x in parts if x) or None
     if value.startswith(sym + " "):
         value, label = value[len(sym) + 1:], f"{label} ({sym})"
-    col.metric(label, value, help=h)
+    col.metric(label, value, help=h, border=True)
     if delta:  # comparación como texto: la flecha de st.metric sugiere una variación que no existe
         col.caption(delta)
 
@@ -748,12 +751,10 @@ def metric(col, label: str, value: str, res=None, help: str | None = None, delta
 # ======================================================================= Resumen
 
 with T["Resumen"]:
-    icon = {"good": "🟢", "warning": "🟡", "critical": "🔴"}[verdict[2]]
-    st.subheader(f"{icon} {verdict[0]}")
-    st.markdown(
-        f"La pre-money propuesta es **{fmt_money(terms.pre_money, currency)}** y los valores centrales de los métodos van "
-        f"de **{fmt_money(lo_mid, currency)}** a **{fmt_money(hi_mid, currency)}**."
-    )
+    box = {"good": st.success, "warning": st.warning, "critical": st.error}[verdict[2]]
+    icon = {"good": ":material/trending_down:", "warning": ":material/balance:", "critical": ":material/trending_up:"}[verdict[2]]
+    box(f"**{verdict[0]}**  \nLa pre-money propuesta es **{fmt_money(terms.pre_money, currency)}** y los valores "
+        f"centrales de los métodos van de **{fmt_money(lo_mid, currency)}** a **{fmt_money(hi_mid, currency)}**.", icon=icon)
     st.caption("Detalle de cada método en sus pestañas; sensibilidad en DCF y probabilidades en Monte Carlo. "
                "Es una comparación con la pre-money propuesta, no una recomendación de inversión.")
     c = st.columns(5)
