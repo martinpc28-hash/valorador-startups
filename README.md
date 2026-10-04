@@ -18,7 +18,8 @@ Aplicación web (Streamlit) que valora una startup a partir de las variables que
 | **Escenarios** | Pesimista, base y optimista con factores editables sobre crecimiento, margen y múltiplo |
 | **Monte Carlo** | 10.000 simulaciones con semilla fija. Crecimiento, margen y múltiplo correlacionados; fracaso simulado; P10/P50/P90 y probabilidad de alcanzar un MOIC objetivo |
 | **Caja y ronda** | Runway, caja mensual, capital que consume el plan y dilución adicional implícita |
-| **Comparables SEC** | Buscador de empresas reales en Form D (rondas privadas), Form C (startups con estados financieros) y S-1 (salidas a bolsa). Filtros por nombre, industria y antigüedad. Al seleccionar una o varias se comparan con tu startup y se ve en qué percentil queda tu ronda o tus ingresos. Un botón **precarga** los datos de la empresa elegida en el modelo |
+| **Comparables** | Buscador de empresas reales: Form D (rondas privadas), Form C (startups con estados financieros) y S-1 (salidas a bolsa) de la SEC, y sociedades españolas del BORME (constituciones y ampliaciones de capital, búsqueda por nombre u objeto social). Filtros por nombre, industria y antigüedad. Al seleccionar una o varias se comparan con tu startup y se ve en qué percentil queda tu ronda o tus ingresos. Un botón **precarga** los datos de la empresa elegida en el modelo |
+| **Ratios España** | Posición de tu empresa frente a las empresas españolas de su sector CNAE y tamaño (Banco de España, Central de Balances): crecimiento, margen EBITDA, ROI, ROE, endeudamiento, coste de la deuda, cobro, pago y productividad, con cuartiles y evolución de 2020 a 2024 |
 | **Mis empresas** | Biblioteca **compartida y sin contraseña** (por ahora todos los visitantes ven las mismas empresas; no guardes datos confidenciales). Creas plantillas de empresas y subes sus estados financieros en Excel, CSV o PDF. La app detecta las partidas en español o inglés (ingresos, EBIT, beneficio neto, caja, deuda, flujo operativo, empleados) y la escala, y rellena ingresos, crecimiento, margen, caja, deuda, burn estimado y pérdidas acumuladas. Revisas, guardas, y desde la barra lateral la cargas en el modelo o la añades a la comparación |
 | **Fondos** | Métricas de un fondo de VC (DPI, RVPI, TVPI, MOIC e IRR con XIRR propio), curva J, proyección tipo Takahashi-Alexander y tamaño frente a los vehículos de VC que presentaron Form D. Flujos editables o cargados desde CSV |
 | **Supuestos** | Tabla editable por etapa: IRR objetivo, supervivencia, dilución, iliquidez |
@@ -60,11 +61,15 @@ Todos los datos son CSV versionados en `data/`. No hay archivos Excel y la app n
 | [SEC EDGAR](https://www.sec.gov/data-research/sec-markets-data) Form D | Ofertas privadas: importe ofrecido y vendido, inversores, grupo de industria y rango de ingresos (empresa a empresa) | jul-2025 a jun-2026 | Información pública de sec.gov, redistribuible sin permiso ([política](https://www.sec.gov/about/privacy-information)) |
 | SEC EDGAR Form C | Crowdfunding: estados financieros de startups pequeñas (ingresos, beneficio neto, caja, deuda, empleados) y condiciones de la oferta | jul-2025 a jun-2026 | Igual que Form D |
 | SEC EDGAR S-1 + XBRL | Empresas que presentaron un S-1 con ingresos en XBRL; sin SPACs, trusts ni fondos | oct-2025 a sep-2026 | Igual que Form D |
+| [Banco de España](https://app.bde.es/gnt_spa/rse/es/), Central de Balances | 10 ratios de empresas españolas por sector CNAE y tamaño (P25, mediana, P75) | ejercicios 2020 a 2024 | Reutilización libre citando "Elaboración propia con datos extraídos del sitio web del Banco de España (www.bde.es)" ([términos](https://www.bde.es/wbe/es/estadisticas/recursos/terminos/terminos-de-uso.html)) |
+| [BORME](https://www.boe.es/datosabiertos/api/api.php) (Agencia Estatal BOE) | Sociedades españolas con constitución o ampliación de capital: provincia, objeto social, CNAE, capital nominal | últimos 12 meses | Reutilización citando "Basado en datos de la Agencia Estatal Boletín Oficial del Estado" y respetando el RGPD ([condiciones](https://www.boe.es/informacion/aviso_legal/index.php)) |
 | Supuestos propios | Parámetros por etapa (semilla a madura) | n/d | Ilustrativos, editables en la app |
 
 Los datos de la SEC son por empresa. **No se guardan personas, firmantes, direcciones ni teléfonos**, solo datos de la empresa, y cada fila enlaza a su presentación en EDGAR. Ni Form D ni Form C informan la valoración. Form C tampoco informa la industria.
 
-`data/sources.csv` registra también las fuentes candidatas investigadas y su estado: FRED, Kenneth French, Pablo Fernandez, Kroll, Carta y PitchBook-NVCA.
+El BORME tampoco incluye datos personales: no se guardan nombramientos, ceses, apoderados ni socios. Su capital es **nominal**: sin la prima de emisión no mide el tamaño de una ronda.
+
+`data/sources.csv` registra también las fuentes evaluadas y no integradas, con el motivo: Registro Mercantil (de pago por documento; sus cuentas anuales en PDF se pueden subir en Mis empresas), OpenCorporates (de pago para uso comercial y para España no aporta más que el BORME), FRED, Kenneth French, Pablo Fernandez, Kroll, Carta y PitchBook-NVCA.
 
 | Archivo | Contenido |
 |---|---|
@@ -79,6 +84,8 @@ Los datos de la SEC son por empresa. **No se guardan personas, firmantes, direcc
 | `data/sec_form_d.csv.gz`, `sec_form_c.csv.gz`, `sec_s1.csv.gz` | Una fila por empresa con su última presentación (comprimidos) |
 | `data/sec_form_d_funds.csv.gz` | Vehículos de VC (fondos y SPVs) que presentaron Form D |
 | `data/sec_manifest.csv` | Archivos de la SEC usados en cada generación |
+| `data/bde_ratios.csv` | Ratios del Banco de España por sector, tamaño, ratio y ejercicio |
+| `data/borme_companies.csv.gz` | Una fila por sociedad del BORME |
 
 ### Limpieza aplicada
 
@@ -95,6 +102,8 @@ Los scripts documentan cómo se generó cada CSV. No hacen falta para ejecutar l
 python scripts/build_damodaran.py --refresh   # vuelve a descargar las 12 páginas
 python scripts/build_ecb.py
 python scripts/build_sec.py --quarters 4      # requiere SEC_USER_AGENT (ver abajo)
+python scripts/build_bde.py                    # ratios del Banco de España
+python scripts/build_borme.py --months 12      # sociedades del BORME (unos 13.000 archivos)
 pytest
 ```
 

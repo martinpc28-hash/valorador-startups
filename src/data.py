@@ -48,6 +48,16 @@ def load_fx() -> pd.DataFrame:
     return pd.read_csv(DATA / "fx_rates.csv")
 
 
+def source_order(metrics: pd.DataFrame) -> list[str]:
+    """Fuentes presentes en `metrics`, en el orden de data/sources.csv (la primera es la de por defecto).
+
+    No depende del orden en que se importan los módulos de src/sources (alfabético).
+    """
+    present = list(dict.fromkeys(metrics["source"]))
+    registry = list(load_sources()["source_id"])
+    return sorted(present, key=lambda s: registry.index(s) if s in registry else len(registry))
+
+
 def industry_table(crosswalk: pd.DataFrame) -> pd.DataFrame:
     """Industrias seleccionables (sin filas de referencia), con su sector."""
     xw = crosswalk[~crosswalk["is_reference"].astype(bool)]
@@ -156,7 +166,7 @@ class MetricResolver:
     ):
         self.metrics = metrics
         self.definitions = definitions
-        available = list(dict.fromkeys(metrics["source"]))
+        available = source_order(metrics)
         self.priority = [s for s in (priority or available) if s in available] + [
             s for s in available if s not in (priority or [])
         ]

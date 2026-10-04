@@ -1,6 +1,7 @@
-"""Empresas individuales de la SEC (Form D, Form C, S-1): búsqueda, comparación y precarga.
+"""Empresas individuales (SEC: Form D, Form C, S-1; España: BORME): búsqueda, comparación y precarga.
 
-Los datos se generan con `scripts/build_sec.py` y se leen de CSV locales. Importes en USD.
+Los datos se generan con `scripts/build_sec.py` y `scripts/build_borme.py` y se leen de CSV locales.
+Importes en la moneda de cada fuente (CURRENCY): USD para la SEC, EUR para el BORME.
 """
 
 from __future__ import annotations
@@ -17,7 +18,9 @@ DATASETS = {
     "sec_form_d": "Rondas privadas (Form D)",
     "sec_form_c": "Startups con financieros (Form C)",
     "sec_s1": "Salidas a bolsa (S-1)",
+    "borme": "Empresas españolas (BORME)",
 }
+CURRENCY = {"sec_form_d": "USD", "sec_form_c": "USD", "sec_s1": "USD", "sec_form_d_funds": "USD", "borme": "EUR"}
 
 # Punto medio de los rangos de ingresos de Form D (para estimar ingresos)
 REVENUE_RANGE_MID = {
@@ -31,8 +34,9 @@ REVENUE_RANGE_MID = {
 
 def load(dataset: str) -> pd.DataFrame:
     name = {"sec_form_d": "sec_form_d.csv.gz", "sec_form_c": "sec_form_c.csv.gz",
-            "sec_s1": "sec_s1.csv.gz", "sec_form_d_funds": "sec_form_d_funds.csv.gz"}[dataset]
-    df = pd.read_csv(DATA / name, dtype={"sic": str, "accession": str})
+            "sec_s1": "sec_s1.csv.gz", "sec_form_d_funds": "sec_form_d_funds.csv.gz",
+            "borme": "borme_companies.csv.gz"}[dataset]
+    df = pd.read_csv(DATA / name, dtype={"sic": str, "accession": str, "cnae": str})
     return add_derived(df, dataset)
 
 
@@ -54,6 +58,8 @@ def add_derived(df: pd.DataFrame, dataset: str) -> pd.DataFrame:
     elif dataset == "sec_form_d":
         df["revenue_est"] = df["revenue_range"].map(REVENUE_RANGE_MID)
         df["round_size"] = df["total_offering"].fillna(df["total_sold"])
+    elif dataset == "borme":
+        df["filing_date"] = df["last_act_date"]
     return df
 
 
@@ -67,7 +73,11 @@ def search(
 ) -> pd.DataFrame:
     out = df
     if text.strip():
-        out = out[out["name"].str.contains(text.strip(), case=False, na=False, regex=False)]
+        q = text.strip()
+        hit = out["name"].str.contains(q, case=False, na=False, regex=False)
+        if "purpose" in out.columns:  # BORME: también busca en el objeto social
+            hit |= out["purpose"].str.contains(q, case=False, na=False, regex=False)
+        out = out[hit]
     if industries and "industry_std" in out.columns:
         out = out[out["industry_std"].isin(industries)]
     if young_only and "inc_within_5y" in out.columns:
@@ -136,7 +146,10 @@ def prefill_from(row: pd.Series, dataset: str) -> Prefill:
             notes["revenue"] = f"Punto medio del rango declarado ({row['revenue_range']})"
     if ok(row.get("industry_std")):
         v["industry"] = str(row["industry_std"])
-        notes["industry"] = f"Equivalencia desde la clasificación de la SEC ({row.get('industry_group') or 'SIC ' + str(row.get('sic', ''))})"
+        if dataset == "borme":
+            notes["industry"] = f"Equivalencia desde el CNAE del objeto social ({row.get('cnae')})"
+        else:
+            notes["industry"] = f"Equivalencia desde la clasificación de la SEC ({row.get('industry_group') or 'SIC ' + str(row.get('sic', ''))})"
     return Prefill(v, notes)
 
 
@@ -154,6 +167,9 @@ COMPARE_ROWS = [
     ("Vendido en la oferta", "total_sold", "money"),
     ("Inversores", "n_investors", "int"),
     ("Empleados", "employees", "int"),
+    ("Constitución", "constitution_date", "text"),
+    ("Capital social (nominal)", "capital_latest", "money"),
+    ("Ampliaciones de capital", "n_capital_increases", "int"),
     ("Fecha de presentación", "filing_date", "text"),
 ]
 

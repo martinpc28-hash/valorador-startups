@@ -25,7 +25,8 @@ def test_schema(metrics):
     assert list(metrics.columns) == SCHEMA
 
 
-SEC_FILES = ["sec_form_d.csv.gz", "sec_form_d_funds.csv.gz", "sec_form_c.csv.gz", "sec_s1.csv.gz"]
+SEC_FILES = ["sec_form_d.csv.gz", "sec_form_d_funds.csv.gz", "sec_form_c.csv.gz", "sec_s1.csv.gz",
+             "bde_ratios.csv", "borme_companies.csv.gz"]
 
 
 @pytest.mark.parametrize("name", ["industry_metrics.csv", "size_class_metrics.csv", "market_metrics.csv", "fx_rates.csv"] + SEC_FILES)

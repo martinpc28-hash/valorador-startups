@@ -26,6 +26,7 @@ from src.data import (
     load_size_metrics,
     load_sources,
     load_stage_assumptions,
+    source_order,
 )
 from src import comparables as cmp
 from src import company_store as cs
@@ -190,28 +191,33 @@ def load_company(company: dict) -> None:
 
 with st.sidebar:
     st.title("Valorador de Startups")
+    st.caption("Rellena los pasos 1 a 3. Todo se recalcula al instante; el veredicto está en la pestaña **Resumen**.")
+    if st.session_state.get("prefill_msg"):
+        msg = f"Datos precargados de {st.session_state.pop('prefill_msg').rstrip('.')}. Revísalos antes de usarlos."
+        st.success(msg)
+        st.toast(msg, icon="✅")
 
     st.subheader("📁 Mis empresas")
     lib = my_companies()
     if lib:
         by_id = {c["id"]: c for c in lib}
-        pick = st.selectbox("Cargar empresa guardada", list(by_id), format_func=lambda i: by_id[i]["name"], key="lib_pick")
-        st.button("Cargar en el modelo", on_click=load_company, args=(by_id[pick],), key="lib_load_btn", type="primary",
-                  help="Sustituye las entradas de la barra lateral por las de la empresa guardada.")
+        pick = st.selectbox("Cargar empresa guardada", list(by_id), format_func=lambda i: by_id[i]["name"], key="lib_pick",
+                            label_visibility="collapsed")
+        b1, b2 = st.columns([3, 1])
+        b1.button("Cargar en el modelo", on_click=load_company, args=(by_id[pick],), key="lib_load_btn", type="primary",
+                  help="Sustituye las entradas de la barra lateral por las de la empresa guardada.", width="stretch")
+        b2.button("🔄", on_click=refresh_library, key="lib_refresh_btn", width="stretch",
+                  help="Actualizar la lista (por si alguien guardó una empresa desde otra sesión).")
     else:
-        st.caption("Aún no hay empresas guardadas. Créalas en la pestaña **Mis empresas** y pulsa **💾 Guardar**: "
-                   "aparecerán aquí para cargarlas en el modelo.")
-    st.button("🔄 Actualizar lista", on_click=refresh_library, key="lib_refresh_btn",
-              help="Vuelve a leer la biblioteca (por si alguien guardó una empresa desde otra sesión).")
+        st.caption("Aún no hay empresas guardadas. Créalas en la pestaña **Mis empresas** y pulsa **💾 Guardar**.")
+        st.button("🔄 Actualizar lista", on_click=refresh_library, key="lib_refresh_btn")
     st.divider()
 
+    st.subheader("1. Contexto")
     _default("currency", "USD")
     currency = st.radio("Moneda base", ["USD", "EUR"], horizontal=True, key="currency",
                         help="Los importes se introducen y se muestran en esta moneda.")
     sym = ch.CURRENCY_SYMBOL[currency]
-
-    if st.session_state.get("prefill_msg"):
-        st.success(f"Datos precargados de {st.session_state.pop('prefill_msg').rstrip('.')}. Revísalos antes de usarlos.")
     options = industries["industry_std"].tolist()
     _default("industry", "Software (System & Application)")
     industry = st.selectbox(
@@ -222,25 +228,16 @@ with st.sidebar:
     _default("stage", stages["stage_label"].iloc[1])
     stage_label = st.selectbox("Etapa", stages["stage_label"].tolist(), key="stage")
 
-    with st.expander("Fuentes de datos"):
-        available = list(dict.fromkeys(D["metrics"]["source"]))
-        priority = st.multiselect(
-            "Orden de prioridad", available, default=available,
-            format_func=lambda s: source_names.get(s, s),
-            help="La primera es la fuente por defecto. Si le falta una métrica se usa la siguiente y se avisa.",
-        )
-        apply_caps = st.checkbox("Recortar valores extremos (topes en metric_definitions.csv)", True)
-
-    st.subheader("Empresa")
+    st.subheader("2. Tu empresa")
     revenue0 = money_input(f"Ingresos últimos 12 meses ({sym})", 1_500_000, "rev0")
     growth = pct_input("Crecimiento anual de ingresos (%)", 0.80, "growth",
                        help="Se mantiene durante los años de alto crecimiento y luego converge a la tasa estable.")
-    hg_years = st.slider("Años de alto crecimiento", 1, 9, 5)
-    current_margin = pct_input("Margen operativo actual (%)", -0.60, "cm", min_value=-1000.0, max_value=90.0)
-    burn = money_input(f"Burn rate mensual ({sym})", 150_000, "burn")
+    current_margin = pct_input("Margen operativo actual (%)", -0.60, "cm", min_value=-1000.0, max_value=90.0,
+                               help="Negativo si la empresa pierde dinero, lo normal en una startup.")
+    burn = money_input(f"Burn rate mensual ({sym})", 150_000, "burn", help="Caja que consume la empresa cada mes.")
     cash = money_input(f"Caja disponible ({sym})", 1_200_000, "cash")
 
-    st.subheader("Ronda")
+    st.subheader("3. La ronda")
     solve_for = st.radio("Calcular", ["Participación", "Pre-money", "Inversión"], horizontal=True, key="solve_for",
                          help="Participación = inversión / (pre-money + inversión). Introduce dos y se calcula la tercera.")
     inv_in = money_input(f"Inversión ({sym})", 3_000_000, "inv") if solve_for != "Inversión" else None
@@ -256,37 +253,48 @@ with st.sidebar:
         f"post-money {fmt_money(terms.post_money, currency)} · participación {fmt_pct(terms.stake)}"
     )
 
-    st.subheader("Salida")
-    exit_year = st.slider("Año de salida", 2, 10, 6)
-    exit_basis = st.radio("Múltiplo de salida", ["EV/Sales", "EV/EBITDA"], horizontal=True)
+    st.subheader("Ajustes avanzados")
+    st.caption("Opcionales: los valores por defecto salen de los datos de la industria y de la etapa.")
+    with st.expander("Proyección y salida"):
+        hg_years = st.slider("Años de alto crecimiento", 1, 9, 5)
+        exit_year = st.slider("Año de salida", 2, 10, 6)
+        exit_basis = st.radio("Múltiplo de salida", ["EV/Sales", "EV/EBITDA"], horizontal=True)
 
-    st.subheader("Tasas y primas")
-    beta_type = st.radio("Beta", ["Total", "De mercado"], horizontal=True,
-                         help="Beta total = beta de mercado / correlación. Supone un inversor no diversificado (fundador, VC concentrado).")
-    rf_default = (us_rf["value"] if currency == "USD" else ea_rf["value"])
-    rf = pct_input("Tasa libre de riesgo (%)", rf_default, f"rf_{currency}", 0.0, 20.0, 0.05,
-                   help=("Bono del Tesoro a 10 años según Damodaran (histimpl)" if currency == "USD"
-                         else "Curva AAA de la zona euro a 10 años (BCE)"))
-    erp = pct_input("Prima de riesgo del mercado (%)", erp_row["value"], "erp", 0.0, 20.0, 0.05,
-                    help=f"Prima implícita de EE. UU. de Damodaran al {erp_row['date']}.")
-    stage_row0 = stages[stages["stage_label"] == stage_label].iloc[0]
-    size_prem = pct_input("Prima por tamaño (%)", 0.0, "size", 0.0, 20.0, 0.25)
-    illiq_prem = pct_input("Prima por iliquidez (%)", stage_row0["illiquidity_premium"], f"illiq_{stage_label}", 0.0, 20.0, 0.25,
-                           help="Por defecto, el supuesto de la etapa.")
+    with st.expander("Tasas, primas y beta"):
+        beta_type = st.radio("Beta", ["Total", "De mercado"], horizontal=True,
+                             help="Beta total = beta de mercado / correlación. Supone un inversor no diversificado (fundador, VC concentrado).")
+        rf_default = (us_rf["value"] if currency == "USD" else ea_rf["value"])
+        rf = pct_input("Tasa libre de riesgo (%)", rf_default, f"rf_{currency}", 0.0, 20.0, 0.05,
+                       help=("Bono del Tesoro a 10 años según Damodaran (histimpl)" if currency == "USD"
+                             else "Curva AAA de la zona euro a 10 años (BCE)"))
+        erp = pct_input("Prima de riesgo del mercado (%)", erp_row["value"], "erp", 0.0, 20.0, 0.05,
+                        help=f"Prima implícita de EE. UU. de Damodaran al {erp_row['date']}.")
+        stage_row0 = stages[stages["stage_label"] == stage_label].iloc[0]
+        size_prem = pct_input("Prima por tamaño (%)", 0.0, "size", 0.0, 20.0, 0.25)
+        illiq_prem = pct_input("Prima por iliquidez (%)", stage_row0["illiquidity_premium"], f"illiq_{stage_label}", 0.0, 20.0, 0.25,
+                               help="Por defecto, el supuesto de la etapa.")
     with st.expander("Estructura de capital e impuestos"):
         de_ratio = pct_input("D/E de la startup (%)", 0.0, "de", 0.0, 500.0, 5.0)
         kd = pct_input("Costo de la deuda antes de impuestos (%)", 0.08, "kd", 0.0, 40.0, 0.25)
         tax = pct_input("Tasa marginal de impuestos (%)", 0.25, "tax", 0.0, 60.0, 0.5)
         nol0 = money_input(f"Pérdidas fiscales acumuladas ({sym})", 0, "nol")
         debt = money_input(f"Deuda financiera ({sym})", 0, "debt")
-
-    st.subheader("Método VC")
-    vc_mode_label = st.radio(
-        "Tratamiento del riesgo de fracaso",
-        ["IRR objetivo (ya incluye el fracaso)", "Costo del equity × supervivencia"],
-        help="Nunca se aplican las dos cosas a la vez: sería contar el fracaso dos veces.",
-    )
+    with st.expander("Método VC"):
+        vc_mode_label = st.radio(
+            "Tratamiento del riesgo de fracaso",
+            ["IRR objetivo (ya incluye el fracaso)", "Costo del equity × supervivencia"],
+            help="Nunca se aplican las dos cosas a la vez: sería contar el fracaso dos veces.",
+        )
     vc_mode = "irr" if vc_mode_label.startswith("IRR") else "survival"
+    with st.expander("Fuentes de datos"):
+        available = source_order(D["metrics"])
+        priority = st.multiselect(
+            "Orden de prioridad", available, default=available,
+            format_func=lambda s: source_names.get(s, s),
+            help="La primera es la fuente por defecto. Si le falta una métrica se usa la siguiente y se avisa. "
+                 "Pon el Banco de España primero para usar ratios de empresas españolas donde existan.",
+        )
+        apply_caps = st.checkbox("Recortar valores extremos (topes en metric_definitions.csv)", True)
 
 
 # ======================================================================= pestañas (controles primero)
@@ -296,8 +304,11 @@ st.caption(f"{industry} · {sector_of[industry]} · etapa {stage_label} · moned
 warn_box = st.container()
 
 tab_names = ["Read Me", "Resumen", "DCF", "Método VC", "Múltiplos", "Escenarios", "Monte Carlo", "Caja y ronda",
-             "Comparables SEC", "Mis empresas", "Fondos", "Supuestos", "Datos y fuentes"]
-T = dict(zip(tab_names, st.tabs(tab_names)))
+             "Comparables", "Ratios España", "Mis empresas", "Fondos", "Supuestos", "Datos y fuentes"]
+TAB_ICONS = {"Read Me": "📖", "Resumen": "🎯", "DCF": "📈", "Método VC": "🚀", "Múltiplos": "✖️", "Escenarios": "🔀",
+             "Monte Carlo": "🎲", "Caja y ronda": "💧", "Comparables": "🔎", "Ratios España": "📊", "Mis empresas": "📁",
+             "Fondos": "🏦", "Supuestos": "⚙️", "Datos y fuentes": "🗂️"}
+T = dict(zip(tab_names, st.tabs([f"{TAB_ICONS.get(n, '')} {n}".strip() for n in tab_names])))
 
 # ======================================================================= Read Me
 
@@ -366,10 +377,15 @@ with T["Read Me"]:
          "Muestra los percentiles P10, P50 y P90 y la probabilidad de alcanzar el MOIC objetivo."),
         ("Caja y ronda", "Calcula cuántos meses de caja quedan (runway), proyecta la caja mes a mes, estima el "
          "capital que necesita el plan y la dilución adicional que implicaría."),
-        ("Comparables SEC", "Buscador de empresas reales de EE. UU. que presentaron documentos ante la SEC: rondas "
-         "privadas (Form D), startups pequeñas con estados financieros (Form C) y salidas a bolsa (S-1). Selecciona "
-         "una o varias para compararlas con tu startup y ver en qué percentil queda tu ronda o tus ingresos. Un botón "
-         "carga los datos de la empresa elegida en el modelo."),
+        ("Comparables", "Buscador de empresas reales. De EE. UU., las que presentaron documentos ante la SEC: rondas "
+         "privadas (Form D), startups pequeñas con estados financieros (Form C) y salidas a bolsa (S-1). De España, las "
+         "sociedades con constituciones o ampliaciones de capital publicadas en el BORME, que se buscan por nombre u objeto "
+         "social. Selecciona una o varias para compararlas con tu startup y ver en qué percentil queda tu ronda o tus "
+         "ingresos. Un botón carga los datos de la empresa elegida en el modelo."),
+        ("Ratios España", "Compara tu empresa con las empresas españolas de su sector (CNAE) y tamaño, con los datos de "
+         "la Central de Balances del Banco de España: crecimiento de ventas, margen EBITDA, rentabilidad, endeudamiento, "
+         "coste de la deuda, periodos de cobro y pago y productividad. Muestra el cuartil inferior, la mediana y el cuartil "
+         "superior, dónde queda tu empresa y la evolución de 2020 a 2024."),
         ("Mis empresas", "Biblioteca de empresas guardadas. Puedes crear una a mano o subir sus estados financieros "
          "en Excel, CSV o PDF: la app reconoce las partidas en español o inglés y la escala (miles o millones) y rellena "
          "los campos. Revisa lo detectado y pulsa **💾 Guardar** al final de la pestaña. Una vez guardada, la empresa "
@@ -387,10 +403,12 @@ with T["Read Me"]:
 
     st.subheader("La barra lateral")
     st.markdown(
-        "Ahí están todas las entradas del modelo. Cualquier cambio recalcula todas las pestañas al instante. "
-        "Los valores marcados con **?** explican de dónde salen. En **Fuentes de datos** eliges el orden de prioridad "
-        "entre fuentes y si se recortan los valores extremos. En **Supuestos anclados en la industria** puedes sustituir "
-        "el margen objetivo, el ratio ventas / capital o el múltiplo de salida de la industria por los tuyos."
+        "Ahí están todas las entradas del modelo, en tres pasos: **1. Contexto** (moneda, industria y etapa), "
+        "**2. Tu empresa** y **3. La ronda**. Cualquier cambio recalcula todas las pestañas al instante. Arriba, en "
+        "**📁 Mis empresas**, cargas una empresa guardada. Los **ajustes avanzados** son opcionales y vienen cerrados: "
+        "proyección y salida, tasas y primas, estructura de capital, método VC, fuentes de datos (por ejemplo, poner el "
+        "Banco de España primero) y los supuestos anclados en la industria (margen objetivo, ventas / capital y múltiplo "
+        "de salida). Los valores marcados con **?** explican de dónde salen."
     )
 
     st.subheader("Fuentes de datos")
@@ -412,6 +430,14 @@ with T["Read Me"]:
         {"Fuente": "SEC EDGAR, S-1 y XBRL", "Qué aporta": "Empresas que solicitaron salir a bolsa, con sus ingresos y márgenes",
          "Fecha de los datos": _sec_range("sec_s1"), "Condiciones": "Información pública, redistribuible",
          "Enlace": "https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data"},
+        {"Fuente": "Banco de España, Central de Balances", "Qué aporta": "Ratios de empresas españolas por sector CNAE y "
+         "tamaño (cuartiles), de 2020 a 2024", "Fecha de los datos": "ejercicios 2020 a 2024",
+         "Condiciones": "Reutilización libre citando al Banco de España",
+         "Enlace": "https://app.bde.es/gnt_spa/rse/es/"},
+        {"Fuente": "BORME (Agencia Estatal BOE)", "Qué aporta": "Sociedades españolas con constituciones o ampliaciones de "
+         "capital: provincia, objeto social, CNAE y capital nominal. Sin datos de personas",
+         "Fecha de los datos": "últimos 12 meses", "Condiciones": "Reutilización libre citando al BOE y respetando el RGPD",
+         "Enlace": "https://www.boe.es/datosabiertos/api/api.php"},
         {"Fuente": "Supuestos propios", "Qué aporta": "Parámetros por etapa (IRR objetivo, supervivencia, dilución, iliquidez)",
          "Fecha de los datos": "n/d", "Condiciones": "Ilustrativos y editables", "Enlace": None},
     ])
@@ -428,6 +454,8 @@ with T["Read Me"]:
         "- Los datos de Damodaran son de empresas cotizadas de EE. UU. Para una startup europea son una referencia, no una medida exacta.\n"
         "- Los múltiplos de la industria vienen de empresas grandes. Para una startup suelen ser altos: compáralos con los de las cotizadas más pequeñas.\n"
         "- Form D y Form C no informan la valoración de las empresas.\n"
+        "- En el BORME el capital y las ampliaciones son nominales: sin la prima de emisión no miden el tamaño de una ronda.\n"
+        "- Los ratios del Banco de España son agregados por sector y tamaño, no datos de empresas concretas.\n"
         "- Los supuestos por etapa son ilustrativos hasta que se integre una fuente verificada con datos por etapa.\n"
         "- La lectura de estados financieros en PDF es la menos fiable: revisa siempre lo detectado."
     )
@@ -505,8 +533,7 @@ if missing:
     st.stop()
 
 # Valores de industria que el usuario puede sustituir
-with st.sidebar:
-    st.subheader("Supuestos anclados en la industria")
+with st.sidebar, st.expander("Supuestos anclados en la industria"):
     target_margin = pct_input("Margen operativo objetivo (%)", R["operating_margin"].value, f"tm_{industry}_{apply_caps}",
                               -100.0, 90.0, help="Por defecto, margen operativo de la industria.\n\n" + R["operating_margin"].provenance())
     margin_year = st.slider("Año en que se alcanza el margen objetivo", 2, 10, 7)
@@ -676,7 +703,12 @@ def metric(col, label: str, value: str, res=None, help: str | None = None, delta
 with T["Resumen"]:
     icon = {"good": "🟢", "warning": "🟡", "critical": "🔴"}[verdict[2]]
     st.subheader(f"{icon} {verdict[0]}")
-    st.caption(verdict[1] + " Comparación con la pre-money propuesta; no es una recomendación de inversión.")
+    st.markdown(
+        f"La pre-money propuesta es **{fmt_money(terms.pre_money, currency)}** y los valores centrales de los métodos van "
+        f"de **{fmt_money(lo_mid, currency)}** a **{fmt_money(hi_mid, currency)}**."
+    )
+    st.caption("Detalle de cada método en sus pestañas; sensibilidad en DCF y probabilidades en Monte Carlo. "
+               "Es una comparación con la pre-money propuesta, no una recomendación de inversión.")
     c = st.columns(5)
     metric(c[0], "Pre-money propuesta", fmt_money(terms.pre_money, currency),
            help=f"Post-money {fmt_money(terms.post_money, currency)}; participación {fmt_pct(terms.stake)}")
@@ -955,42 +987,66 @@ def load_sec(dataset: str) -> pd.DataFrame:
     return cmp.load(dataset)
 
 
-with T["Comparables SEC"]:
-    rate = usd_rate(currency)
+with T["Comparables"]:
     st.caption(
-        "Empresas individuales con datos públicos presentados ante la SEC (EE. UU.), últimos 4 trimestres. "
-        "Importes originales en USD; se muestran en la moneda base. Selecciona una o varias filas para compararlas con "
-        "tu startup y, si quieres, precargar sus datos en el modelo."
+        "Empresas reales con datos públicos: presentaciones ante la SEC (EE. UU., últimos 4 trimestres) y actos "
+        "inscritos en el Registro Mercantil publicados en el BORME (España, últimos 12 meses). Los importes se muestran "
+        "en la moneda base. Selecciona una o varias filas para compararlas con tu startup y, si quieres, precargar sus "
+        "datos en el modelo."
     )
     ds = st.radio("Fuente", list(cmp.DATASETS), format_func=cmp.DATASETS.get, horizontal=True, key="sec_ds")
+    # Unidades de la moneda de la fuente por unidad de la moneda base: x / rate pasa a la moneda base
+    rate = usd_rate(currency) / usd_rate(cmp.CURRENCY[ds])
     df_all = load_sec(ds)
+    if ds == "borme":
+        st.info("BORME: el capital y las ampliaciones son importes **nominales**. No incluyen la prima de emisión, así "
+                "que no miden el tamaño real de una ronda. No hay ingresos ni beneficios. Fuente: basado en datos de la "
+                "Agencia Estatal Boletín Oficial del Estado.", icon="ℹ️")
     f1, f2, f3 = st.columns([2, 2, 1])
-    text = f1.text_input("Buscar por nombre", key=f"sec_q_{ds}", placeholder="p. ej. robotics, health, AI…")
+    text = f1.text_input("Buscar por nombre" + (" u objeto social" if ds == "borme" else ""), key=f"sec_q_{ds}",
+                         placeholder="p. ej. software, inteligencia artificial, biotecnología" if ds == "borme" else "p. ej. robotics, health, AI…")
     if ds == "sec_form_c":
         f2.caption("Form C no informa la industria: filtra por nombre o por ingresos.")
         inds = None
     else:
         ind_opts = sorted(df_all["industry_std"].dropna().unique())
-        inds = f2.multiselect("Industria", ind_opts, default=[industry] if industry in ind_opts else [],
-                              key=f"sec_ind_{ds}_{industry}")
+        # BORME: solo una parte de las sociedades declara CNAE, así que no se filtra por industria por defecto
+        inds = f2.multiselect("Industria", ind_opts, default=[industry] if industry in ind_opts and ds != "borme" else [],
+                              key=f"sec_ind_{ds}_{industry}",
+                              help="En el BORME solo las sociedades que indican su CNAE tienen industria; busca mejor por objeto social."
+                              if ds == "borme" else None)
     young = f3.checkbox("Constituidas hace < 5 años", True, key="sec_young") if ds == "sec_form_d" else False
     with_rev = f3.checkbox("Solo con ingresos", True, key="sec_rev") if ds == "sec_form_c" else False
+    if ds == "borme":
+        if f3.checkbox("Solo activas", True, key="borme_alive", help="Excluye las sociedades disueltas o extinguidas."):
+            df_all = df_all[~df_all["dissolved"].astype(bool)]
+        if f3.checkbox("Con ampliaciones", False, key="borme_ampl",
+                       help="Solo sociedades que han ampliado capital: señal de que han levantado fondos."):
+            df_all = df_all[df_all["n_capital_increases"] > 0]
     res = cmp.search(df_all, text, inds, young, with_rev)
 
     cols = {
         "sec_form_d": ["name", "industry_std", "state", "revenue_range", "round_size", "total_sold", "n_investors", "first_sale_date", "filing_date", "url"],
         "sec_form_c": ["name", "state", "revenue", "growth", "net_margin", "cash", "employees", "round_size", "filing_date", "url"],
         "sec_s1": ["name", "industry_std", "state", "fiscal_year", "revenue", "growth", "operating_margin", "filing_date", "url"],
+        "borme": ["name", "industry_std", "province", "town", "constitution_date", "capital_latest", "n_capital_increases",
+                  "capital_increases_total", "purpose", "last_act_date", "url"],
     }[ds]
     labels = {"name": "Empresa", "industry_std": "Industria", "state": "Estado/país", "revenue_range": "Rango de ingresos",
               "round_size": f"Oferta ({sym})", "total_sold": f"Vendido ({sym})", "n_investors": "Inversores",
               "first_sale_date": "Primera venta", "filing_date": "Presentación", "revenue": f"Ingresos ({sym})",
               "growth": "Crecimiento", "net_margin": "Margen neto", "cash": f"Caja ({sym})", "employees": "Empleados",
-              "operating_margin": "Margen operativo", "fiscal_year": "Ejercicio", "url": "EDGAR"}
+              "operating_margin": "Margen operativo", "fiscal_year": "Ejercicio",
+              "url": "BORME" if ds == "borme" else "EDGAR", "province": "Provincia", "town": "Municipio",
+              "constitution_date": "Constitución", "capital_latest": f"Capital nominal ({sym})", "n_capital_increases": "Ampliaciones",
+              "capital_increases_total": f"Ampliado nominal ({sym})", "purpose": "Objeto social", "last_act_date": "Último acto"}
+    money_cols = ("round_size", "total_sold", "revenue", "cash", "capital_latest", "capital_increases_total")
     view = res[cols].copy()
-    for c in ("round_size", "total_sold", "revenue", "cash"):
+    for c in money_cols:
         if c in view:
             view[c] = view[c] / rate
+    if "industry_std" in view:
+        view["industry_std"] = view["industry_std"].fillna("Sin clasificar")
     n_total = len(cmp.search(df_all, text, inds, young, with_rev, limit=10**7))
     st.caption(f"{n_total:,} empresas coinciden".replace(",", ".") + (" (se muestran las 500 más recientes)." if n_total > 500 else "."))
     event = st.dataframe(
@@ -998,32 +1054,42 @@ with T["Comparables SEC"]:
         on_select="rerun", selection_mode="multi-row", key=f"sec_table_{ds}",
         column_config={
             "EDGAR": st.column_config.LinkColumn("EDGAR", display_text="ver filing"),
+            "BORME": st.column_config.LinkColumn("BORME", display_text="ver BORME"),
             "Crecimiento": st.column_config.NumberColumn(format="percent"),
             "Margen neto": st.column_config.NumberColumn(format="percent"),
             "Margen operativo": st.column_config.NumberColumn(format="percent"),
-            **{labels[c]: st.column_config.NumberColumn(format="compact") for c in ("round_size", "total_sold", "revenue", "cash") if c in cols},
+            **{labels[c]: st.column_config.NumberColumn(format="compact") for c in money_cols if c in cols},
         },
     )
     picked = res.iloc[event.selection.rows] if event and event.selection.rows else res.iloc[0:0]
 
     # Contexto: dónde queda tu startup en la distribución de la fuente
-    if ds == "sec_form_d":
+    if ds == "borme":
+        sample = df_all[df_all["industry_std"].isin(inds)] if inds else df_all
+        k1, k2, k3 = st.columns(3)
+        metric(k1, "Sociedades en la muestra", f"{len(sample):,}".replace(",", "."))
+        metric(k2, "Constituidas en el periodo", f"{int(sample['constitution_date'].notna().sum()):,}".replace(",", "."))
+        metric(k3, "Con ampliaciones de capital", f"{int((sample['n_capital_increases'] > 0).sum()):,}".replace(",", "."),
+               help="Señal de que la sociedad ha levantado fondos, aunque el importe nominal no mide la ronda.")
+        series = pd.Series(dtype=float)
+    elif ds == "sec_form_d":
         sample = df_all[df_all["industry_std"].isin(inds)] if inds else df_all
         sample = sample[sample["inc_within_5y"].astype(bool)] if young else sample
         your, series, what = terms.investment * rate, sample["round_size"], "tamaño de ronda"
     else:
         sample = df_all[df_all["industry_std"].isin(inds)] if inds else df_all
         your, series, what = revenue0 * rate, sample["revenue"], "ingresos"
-    pctl = cmp.percentile_of(your, series[series > 0])
-    k1, k2, k3 = st.columns(3)
-    metric(k1, f"Empresas en la muestra", f"{int((series > 0).sum()):,}".replace(",", "."))
-    metric(k2, f"Mediana de {what}", fmt_money(float(series[series > 0].median()) / rate, currency) if (series > 0).any() else "n/d")
-    metric(k3, f"Tu {what}: percentil", fmt_pct(pctl, 0) if not math.isnan(pctl) else "n/d",
-           help=f"Porcentaje de la muestra con {what} menor que el tuyo ({fmt_money(your / rate, currency)}).")
-    if (series > 0).sum() >= 10:
-        st.plotly_chart(ch.log_histogram(series[series > 0] / rate, f"Distribución de {what} en la muestra",
-                                         f"{what.capitalize()} ({sym}, escala logarítmica)",
-                                         {"Tu startup": your / rate}), width="stretch")
+    if ds != "borme":
+        pctl = cmp.percentile_of(your, series[series > 0])
+        k1, k2, k3 = st.columns(3)
+        metric(k1, f"Empresas en la muestra", f"{int((series > 0).sum()):,}".replace(",", "."))
+        metric(k2, f"Mediana de {what}", fmt_money(float(series[series > 0].median()) / rate, currency) if (series > 0).any() else "n/d")
+        metric(k3, f"Tu {what}: percentil", fmt_pct(pctl, 0) if not math.isnan(pctl) else "n/d",
+               help=f"Porcentaje de la muestra con {what} menor que el tuyo ({fmt_money(your / rate, currency)}).")
+        if (series > 0).sum() >= 10:
+            st.plotly_chart(ch.log_histogram(series[series > 0] / rate, f"Distribución de {what} en la muestra",
+                                             f"{what.capitalize()} ({sym}, escala logarítmica)",
+                                             {"Tu startup": your / rate}), width="stretch")
 
     lib_now = my_companies()
     mine = []
@@ -1040,7 +1106,7 @@ with T["Comparables SEC"]:
             "cash": cash, "round_size": terms.investment, "filing_date": "n/d",
         }
         shown = picked.copy()
-        for c in ("revenue", "revenue_est", "cash", "round_size", "total_sold"):
+        for c in ("revenue", "revenue_est", "cash", "round_size", "total_sold", "capital_latest"):
             if c in shown:
                 shown[c] = shown[c] / rate
         own_rows = []
@@ -1084,9 +1150,126 @@ with T["Comparables SEC"]:
         else:
             st.info("Esta presentación no trae datos que se puedan cargar en el modelo.")
 
+# ======================================================================= Ratios España
+
+from src.sources import bde as bde_source  # noqa: E402
+
+BDE_LABELS = {
+    "revenue_growth_1y": "Crecimiento de las ventas", "ebitda_margin": "EBITDA sobre ventas",
+    "roi_ordinary": "Rentabilidad ordinaria del activo (ROI)", "roe": "Rentabilidad de los recursos propios (ROE)",
+    "cost_of_debt": "Coste medio de la financiación", "debt_to_liabilities": "Recursos ajenos sobre pasivo",
+    "sales_per_employee": "Ventas por empleado", "personnel_cost_per_employee": "Gasto de personal por empleado",
+    "receivable_days": "Periodo medio de cobro (días)", "payable_days": "Periodo medio de pago (días)",
+}
+
+
+@st.cache_data(show_spinner=False)
+def load_bde_detail() -> pd.DataFrame:
+    return bde_source.load_detail()
+
+
+size_for_revenue = bde_source.size_for_revenue
+
+
+def fmt_ratio(v: float, unit: str) -> str:
+    if v is None or (isinstance(v, float) and math.isnan(v)):
+        return "n/d"
+    if unit == "decimal":
+        return fmt_pct(v)
+    if unit == "eur":
+        return fmt_money(v, "EUR", 1)
+    return fmt_num(v, 0)
+
+
+def position(v: float, p25: float, p50: float, p75: float) -> str:
+    if v is None or any(isinstance(x, float) and math.isnan(x) for x in (v, p25, p50, p75)):
+        return "n/d"
+    if v < p25:
+        return "Por debajo del P25"
+    if v < p50:
+        return "Entre P25 y la mediana"
+    if v < p75:
+        return "Entre la mediana y P75"
+    return "Por encima del P75"
+
+
+with T["Ratios España"]:
+    det = load_bde_detail()
+    if det.empty:
+        st.info("Los ratios del Banco de España aún no están disponibles en esta versión.")
+    else:
+        st.caption("Ratios de empresas españolas no financieras por sector (CNAE) y tamaño: cuartil inferior (P25), mediana "
+                   "y cuartil superior (P75). Fuente: elaboración propia con datos extraídos del sitio web del Banco de "
+                   "España (www.bde.es), Central de Balances.")
+        sec_names = det.drop_duplicates("sector_code").set_index("sector_code")["sector_name"].to_dict()
+        bde_xw = D["crosswalk"][D["crosswalk"]["source"] == "bde"].set_index("industry_std")["industry_original"].to_dict()
+        default_sector = bde_xw.get(industry, "ZC")
+        codes = sorted(sec_names, key=lambda c: (c not in ("Z0", "ZC"), c))
+        rev_eur = revenue0 * usd_rate(currency) / usd_rate("EUR")
+        sizes = det.drop_duplicates("size_id").set_index("size_id")["size_name"].to_dict()
+        r1, r2, r3 = st.columns([3, 2, 1])
+        sector = r1.selectbox("Sector CNAE", codes, index=codes.index(default_sector) if default_sector in codes else 0,
+                              format_func=lambda c: f"{c} · {sec_names[c]}", key=f"bde_sector_{industry}",
+                              help="Por defecto, el sector asociado a la industria elegida en la barra lateral.")
+        size_ids = list(sizes)
+        default_size = size_for_revenue(rev_eur)
+        size_id = r2.selectbox("Tamaño (cifra de negocios)", size_ids, index=size_ids.index(default_size) if default_size in size_ids else 0,
+                               format_func=sizes.get, key=f"bde_size_{default_size}",
+                               help="Por defecto, el tramo que corresponde a tus ingresos.")
+        years = sorted(det["year"].unique(), reverse=True)
+        year = r3.selectbox("Ejercicio", years, key="bde_year")
+        if sector not in bde_xw.values():
+            st.caption(f"La industria «{industry}» no tiene un sector CNAE asociado; se muestra el total de empresas.")
+
+        employees = st.number_input("Empleados de tu empresa (opcional, para ventas por empleado)", 0, 100000, 0, 1, key="bde_emp")
+        cut = det[(det["sector_code"] == sector) & (det["size_id"] == size_id)]
+        now = cut[cut["year"] == year].set_index("metric")
+        mine_vals = {
+            "revenue_growth_1y": growth,
+            "ebitda_margin": current_margin + da_margin,
+            "cost_of_debt": kd if de_ratio > 0 else math.nan,
+            "sales_per_employee": rev_eur / employees if employees else math.nan,
+        }
+        rows = []
+        for m, label in BDE_LABELS.items():
+            if m not in now.index:
+                continue
+            r = now.loc[m]
+            mv = mine_vals.get(m, math.nan)
+            rows.append({"Ratio": label, "P25": fmt_ratio(r["p25"], r["unit"]), "Mediana": fmt_ratio(r["p50"], r["unit"]),
+                         "P75": fmt_ratio(r["p75"], r["unit"]), "Tu empresa": fmt_ratio(mv, r["unit"]),
+                         "Posición": position(mv, r["p25"], r["p50"], r["p75"])})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        st.caption("Tu empresa: crecimiento y margen EBITDA (margen operativo más amortización típica de la industria) salen "
+                   "de la barra lateral; el coste de la deuda, si tienes deuda. Las ventas se convierten a euros con el tipo "
+                   "del BCE. Para una startup en pérdidas lo normal es quedar por debajo del P25 en rentabilidad.")
+
+        pick = st.selectbox("Evolución del ratio", [m for m in BDE_LABELS if m in cut["metric"].unique()],
+                            format_func=BDE_LABELS.get, key="bde_trend")
+        tr = cut[cut["metric"] == pick].sort_values("year")
+        if not tr.empty:
+            unit = tr["unit"].iloc[0]
+            k = 100 if unit == "decimal" else 1
+            import plotly.graph_objects as go
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=tr["year"], y=tr["p75"] * k, mode="lines", line=dict(width=0), showlegend=False,
+                                     hoverinfo="skip"))
+            fig.add_trace(go.Scatter(x=tr["year"], y=tr["p25"] * k, mode="lines", line=dict(width=0), fill="tonexty",
+                                     fillcolor="rgba(42,120,214,0.15)", name="P25 a P75",
+                                     hovertemplate="%{x}: P25 %{y:,.1f}<extra></extra>"))
+            fig.add_trace(go.Scatter(x=tr["year"], y=tr["p50"] * k, mode="lines+markers", name="Mediana",
+                                     line=dict(color=ch.BLUE, width=2), marker=dict(size=8, line=dict(color="white", width=2)),
+                                     hovertemplate="%{x}: mediana %{y:,.1f}<extra></extra>"))
+            ch._layout(fig, f"{BDE_LABELS[pick]} · {sec_names[sector]} · {sizes[size_id]}", height=340,
+                       legend=dict(orientation="h", y=1.12, x=0))
+            fig.update_xaxes(dtick=1, title="Ejercicio")
+            fig.update_yaxes(title="%" if unit == "decimal" else ("euros" if unit == "eur" else "días"),
+                             ticksuffix=" %" if unit == "decimal" else "")
+            st.plotly_chart(fig, width="stretch")
+
 # ======================================================================= Mis empresas
 
-CO_MONEY = [("revenue", "Ingresos últimos 12 meses"), ("burn", "Burn rate mensual"), ("cash", "Caja disponible"),
+CO_MONEY =[("revenue", "Ingresos últimos 12 meses"), ("burn", "Burn rate mensual"), ("cash", "Caja disponible"),
             ("debt", "Deuda financiera"), ("nol", "Pérdidas fiscales acumuladas"), ("investment", "Inversión de la ronda"),
             ("pre_money", "Pre-money propuesta")]
 CO_PCT = [("growth", "Crecimiento anual de ingresos (%)"), ("current_margin", "Margen operativo actual (%)")]
@@ -1210,9 +1393,13 @@ with T["Mis empresas"]:
     st.selectbox("Empresa", ["__new__", *by_id], key="co_pick", on_change=co_select,
                  format_func=lambda i: "➕ Nueva empresa" if i == "__new__" else by_id[i]["name"])
     if st.session_state.get("co_msg"):
-        st.success(st.session_state.pop("co_msg"))
+        msg = st.session_state.pop("co_msg")
+        st.success(msg)
+        st.toast(msg, icon="✅")  # visible aunque el botón quede lejos del mensaje
     if st.session_state.get("co_msg_err"):
-        st.error(st.session_state.pop("co_msg_err"))
+        msg = st.session_state.pop("co_msg_err")
+        st.error(msg)
+        st.toast(msg, icon="⚠️")
 
     st.subheader("1. Estados financieros (opcional)")
     st.caption("Sube la cuenta de resultados, el balance o ambos (Excel, CSV o PDF). Detecto las partidas por su nombre "
@@ -1267,18 +1454,19 @@ with T["Mis empresas"]:
     p[1].number_input(CO_PCT[1][1], -1000.0, 90.0, step=0.5, format="%.2f", key="co_current_margin")
     st.text_area("Notas", key="co_notes", height=80)
 
-    st.markdown("**Histórico financiero** (editable)")
-    fin_df = st.data_editor(_fin_to_editor(st.session_state.get("co_fin", {})), num_rows="dynamic", hide_index=True,
-                            width="stretch", key=f"co_fin_editor_{st.session_state.get('co_editor_v', 0)}",
-                            column_config={"Partida": st.column_config.SelectboxColumn("Partida", options=list(LABEL_ITEM), required=True)})
-    if st.session_state.get("co_files"):
-        st.caption("Archivos de origen: " + ", ".join(st.session_state["co_files"]) + " (solo se guardan las cifras, no los archivos).")
+    with st.expander("Histórico financiero por año (editable, opcional)", expanded=bool(st.session_state.get("co_fin"))):
+        fin_df = st.data_editor(_fin_to_editor(st.session_state.get("co_fin", {})), num_rows="dynamic", hide_index=True,
+                                width="stretch", key=f"co_fin_editor_{st.session_state.get('co_editor_v', 0)}",
+                                column_config={"Partida": st.column_config.SelectboxColumn("Partida", options=list(LABEL_ITEM), required=True)})
+        if st.session_state.get("co_files"):
+            st.caption("Archivos de origen: " + ", ".join(st.session_state["co_files"]) + " (solo se guardan las cifras, no los archivos).")
 
+    st.subheader("3. Guardar")
     s1, s2, s3 = st.columns([1, 1, 1])
-    s1.button("💾 Guardar", type="primary", on_click=co_save, args=(fin_df,), key="co_save_btn")
-    s2.button("Guardar y cargar en el modelo", on_click=co_save, args=(fin_df, True), key="co_save_load_btn")
+    s1.button("💾 Guardar", type="primary", on_click=co_save, args=(fin_df,), key="co_save_btn", width="stretch")
+    s2.button("Guardar y cargar en el modelo", on_click=co_save, args=(fin_df, True), key="co_save_load_btn", width="stretch")
     if st.session_state.get("co_pick") != "__new__":
-        s3.button("🗑️ Eliminar", on_click=co_delete, key="co_del_btn")
+        s3.button("🗑️ Eliminar", on_click=co_delete, key="co_del_btn", width="stretch")
 
     if lib:
         st.subheader("Tu biblioteca")

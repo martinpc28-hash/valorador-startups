@@ -248,3 +248,54 @@ sec_sic,8711,Engineering/Construction,Industria,False
 sec_sic,8731,Drugs (Biotechnology),Salud,False
 sec_sic,8734,Business & Consumer Services,Servicios,False
 sec_sic,8742,Business & Consumer Services,Servicios,False
+bde,Z0,Total Market,Referencia,True
+bde,ZC,Total Market (without financials),Referencia,True
+bde,M73,Advertising,Medios y telecomunicaciones,False
+bde,C30,Aerospace/Defense,Industria,False
+bde,H51,Air Transport,Transporte,False
+bde,C14,Apparel,Consumo,False
+bde,C29,Auto & Truck,Consumo,False
+bde,C11,Beverage (Alcoholic),Consumo,False
+bde,J60,Broadcasting,Medios y telecomunicaciones,False
+bde,C23,Building Materials,Industria,False
+bde,N82,Business & Consumer Services,Servicios,False
+bde,C20,Chemical (Basic),Energía y materiales,False
+bde,B05,Coal & Related Energy,Energía y materiales,False
+bde,C26,Computers/Peripherals,Tecnología,False
+bde,M72,Drugs (Biotechnology),Salud,False
+bde,C21,Drugs (Pharmaceutical),Salud,False
+bde,P85,Education,Servicios,False
+bde,C27,Electrical Equipment,Industria,False
+bde,F42,Engineering/Construction,Industria,False
+bde,J59,Entertainment,Medios y telecomunicaciones,False
+bde,E38,Environmental & Waste Services,Servicios,False
+bde,A01,Farming/Agriculture,Consumo,False
+bde,C10,Food Processing,Consumo,False
+bde,G46,Food Wholesalers,Consumo,False
+bde,C31,Furn/Home Furnishings,Consumo,False
+bde,F41,Homebuilding,Inmobiliario,False
+bde,Q86,Hospitals/Healthcare Facilities,Salud,False
+bde,Q88,Healthcare Support Services,Salud,False
+bde,I55,Hotel/Gaming,Consumo,False
+bde,C28,Machinery,Industria,False
+bde,B08,Metals & Mining,Energía y materiales,False
+bde,B06,Oil/Gas (Production and Exploration),Energía y materiales,False
+bde,B09,Oilfield Svcs/Equip.,Energía y materiales,False
+bde,C17,Paper/Forest Products,Energía y materiales,False
+bde,D35,Power,Servicios públicos,False
+bde,J58,Publishing & Newspapers,Medios y telecomunicaciones,False
+bde,L68,Real Estate (Operations & Services),Inmobiliario,False
+bde,R93,Recreation,Consumo,False
+bde,I56,Restaurant/Dining,Consumo,False
+bde,G45,Retail (Automotive),Consumo,False
+bde,G47,Retail (General),Consumo,False
+bde,C22,Rubber & Tires,Consumo,False
+bde,C15,Shoe,Consumo,False
+bde,J62,Software (System & Application),Tecnología,False
+bde,J63,Software (Internet),Tecnología,False
+bde,C24,Steel,Energía y materiales,False
+bde,J61,Telecom. Services,Medios y telecomunicaciones,False
+bde,C12,Tobacco,Consumo,False
+bde,H52,Transportation,Transporte,False
+bde,H49,Trucking,Transporte,False
+bde,E36,Utility (Water),Servicios públicos,False
