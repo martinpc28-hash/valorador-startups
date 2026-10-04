@@ -725,9 +725,11 @@ with warn_box:
                 st.markdown(f"- {w}")
 
 
-def metric(col, label: str, value: str, res=None, help: str | None = None, delta: str | None = None):
-    """Tarjeta con la procedencia en el tooltip. La moneda pasa a la etiqueta para que el valor quepa."""
-    h = res.provenance() if res is not None else help
+def metric(col, label: str, value: str, res=None, help: str | None = None, delta: str | None = None,
+           formula: str | None = None):
+    """Tarjeta con fórmula, explicación y procedencia en el tooltip. La moneda pasa a la etiqueta para que quepa."""
+    parts = [f"**Fórmula:** {formula}" if formula else None, help, res.provenance() if res is not None else None]
+    h = "\n\n".join(x for x in parts if x) or None
     if value.startswith(sym + " "):
         value, label = value[len(sym) + 1:], f"{label} ({sym})"
     col.metric(label, value, help=h)
@@ -748,14 +750,24 @@ with T["Resumen"]:
                "Es una comparación con la pre-money propuesta, no una recomendación de inversión.")
     c = st.columns(5)
     metric(c[0], "Pre-money propuesta", fmt_money(terms.pre_money, currency),
-           help=f"Post-money {fmt_money(terms.post_money, currency)}; participación {fmt_pct(terms.stake)}")
+           formula=f"pre-money = post-money − inversión = {fmt_money(terms.post_money, currency)} − {fmt_money(terms.investment, currency)}. "
+                   f"Participación = inversión / post-money = {fmt_pct(terms.stake)}")
     metric(c[1], "DCF (equity)", fmt_money(dcf_res.equity_value, currency),
-           help="Valor esperado con probabilidad de supervivencia, más caja y menos deuda.")
+           formula=f"equity = p × valor operativo + (1 − p) × recuperación × valor operativo + caja − deuda, con p = "
+                   f"{fmt_pct(base.survival_prob)} y valor operativo = {fmt_money(dcf_res.operating_value, currency)}",
+           help="Valor esperado con probabilidad de supervivencia. Detalle en la pestaña DCF.")
     metric(c[2], "Método VC (pre-money)", fmt_money(vc_res.pre_money, currency),
-           help=f"Salida {fmt_money(vc_res.exit_value, currency)} en el año {exit_year}, descontada a {fmt_pct(vc_res.discount_rate)}.")
+           formula=f"pre-money = valor de salida × (1 − dilución){' × p' if vc_mode == 'survival' else ''} / (1 + r)^T − inversión = "
+                   f"{fmt_money(vc_res.exit_value, currency)} × (1 − {fmt_pct(stage['future_dilution'])})"
+                   f"{' × ' + fmt_pct(vc_res.survival_prob) if vc_mode == 'survival' else ''} / (1 + {fmt_pct(vc_res.discount_rate)})^{exit_year}"
+                   f" − {fmt_money(terms.investment, currency)}")
     metric(c[3], "MOIC si hay salida", fmt_mult(deal.moic),
+           formula=f"MOIC = participación × (1 − dilución) × valor de salida / inversión = {fmt_pct(terms.stake)} × "
+                   f"(1 − {fmt_pct(stage['future_dilution'])}) × {fmt_money(vc_res.exit_value, currency)} / {fmt_money(terms.investment, currency)}",
            help=f"Esperado con supervivencia ({fmt_pct(stage['survival_prob'])}): {fmt_mult(deal.expected_moic)}")
-    metric(c[4], "Runway", f"{fmt_num(runway, 1)} meses", help="Caja disponible / burn rate mensual (sin la ronda).")
+    metric(c[4], "Runway", f"{fmt_num(runway, 1)} meses",
+           formula=f"runway = caja / burn rate mensual = {fmt_money(cash, currency)} / {fmt_money(burn, currency)}",
+           help="Sin contar el dinero de la ronda.")
 
     st.plotly_chart(ch.football_field(ff_rows, terms.pre_money, currency), width="stretch")
     st.dataframe(pd.DataFrame([{
@@ -776,25 +788,41 @@ with T["Resumen"]:
 with T["DCF"]:
     st.subheader("Costo de capital")
     c = st.columns(5)
-    metric(c[0], "Beta desapalancada (industria)", fmt_num(R["unlevered_beta_cash_adj"].value, 2), R["unlevered_beta_cash_adj"])
-    metric(c[1], "Correlación con el mercado", fmt_pct(R["correlation_market"].value), R["correlation_market"])
+    metric(c[0], "Beta desapalancada (industria)", fmt_num(R["unlevered_beta_cash_adj"].value, 2), R["unlevered_beta_cash_adj"],
+           formula="dato de la fuente: beta desapalancada corregida por efectivo = beta desapalancada / (1 − efectivo / valor de la empresa)")
+    metric(c[1], "Correlación con el mercado", fmt_pct(R["correlation_market"].value), R["correlation_market"],
+           formula="dato de la fuente: correlación media de las acciones de la industria con el índice de mercado")
     metric(c[2], f"Beta usada ({dr.beta_type})", fmt_num(dr.beta_used, 2),
-           help="Beta desapalancada corregida por efectivo" + (" / correlación" if use_total else "")
-           + f", reapalancada con D/E {fmt_pct(de_ratio)}.")
+           formula=("βL = βU / ρ × (1 + (1 − t) × D/E)" if use_total else "βL = βU × (1 + (1 − t) × D/E)")
+           + f" = {fmt_num(R['unlevered_beta_cash_adj'].value, 2)}" + (f" / {fmt_pct(R['correlation_market'].value)}" if use_total else "")
+           + f" × (1 + (1 − {fmt_pct(tax)}) × {fmt_pct(de_ratio)})",
+           help="Beta total: para un inversor no diversificado (divide por la correlación). Beta de mercado: diversificado.")
     metric(c[3], "Costo del equity", fmt_pct(dr.cost_of_equity),
-           help=f"{fmt_pct(rf)} + {fmt_num(dr.beta_used, 2)} × {fmt_pct(erp)} + {fmt_pct(size_prem + illiq_prem)} de primas")
+           formula=f"ke = rf + β × prima de riesgo + prima de tamaño + prima de iliquidez = {fmt_pct(rf)} + {fmt_num(dr.beta_used, 2)} × "
+                   f"{fmt_pct(erp)} + {fmt_pct(size_prem)} + {fmt_pct(illiq_prem)}")
     metric(c[4], "Tasa madura (año 10)", fmt_pct(mature_coc),
-           help="WACC con beta de mercado y D/E de la industria: hacia ella converge la tasa de descuento.")
+           formula="WACC = E/(D+E) × (rf + βL industria × prima) + D/(D+E) × kd industria × (1 − t), con βL industria = "
+                   "βU × (1 + (1 − t) × D/E industria)",
+           help="Hacia ella converge la tasa de descuento entre el final del alto crecimiento y el año 10.")
 
     st.subheader("Valor")
     c = st.columns(5)
-    metric(c[0], "VP de los flujos (10 años)", fmt_money(dcf_res.pv_fcff, currency))
+    metric(c[0], "VP de los flujos (10 años)", fmt_money(dcf_res.pv_fcff, currency),
+           formula="Σ FCFF_t / Π (1 + r_i), años 1 a 10; FCFF = EBIT − impuestos (tras compensar pérdidas) − reinversión; "
+                   "reinversión = (ingresos_t − ingresos_t−1) / (ventas / capital)")
     metric(c[1], "VP del valor terminal", fmt_money(dcf_res.pv_terminal, currency),
-           help=f"Crecimiento estable {fmt_pct(dcf_res.stable_growth_used)}; ROC terminal {fmt_pct(terminal_roc)}")
-    metric(c[2], "Valor operativo en marcha", fmt_money(dcf_res.operating_value, currency))
+           formula="VT = EBIT_11 × (1 − t) × (1 − g / ROC) / (r madura − g); VP = VT / Π (1 + r_i) del año 10",
+           help=f"g = {fmt_pct(dcf_res.stable_growth_used)} (limitado a la tasa libre de riesgo); ROC = {fmt_pct(terminal_roc)}; "
+                f"valor terminal sin descontar {fmt_money(dcf_res.terminal_value, currency)}")
+    metric(c[2], "Valor operativo en marcha", fmt_money(dcf_res.operating_value, currency),
+           formula=f"VP de los flujos + VP del valor terminal = {fmt_money(dcf_res.pv_fcff, currency)} + {fmt_money(dcf_res.pv_terminal, currency)}")
     metric(c[3], "Ajustado por supervivencia", fmt_money(dcf_res.survival_adjusted_value, currency),
-           help=f"Probabilidad de supervivencia {fmt_pct(base.survival_prob)} (supuesto de etapa)")
-    metric(c[4], "Valor del equity", fmt_money(dcf_res.equity_value, currency), help="Más caja, menos deuda")
+           formula=f"p × valor operativo + (1 − p) × recuperación × valor operativo, con p = {fmt_pct(base.survival_prob)} "
+                   f"y recuperación = {fmt_pct(base.distress_proceeds)}",
+           help="p es la probabilidad de supervivencia de la etapa (pestaña Supuestos).")
+    metric(c[4], "Valor del equity", fmt_money(dcf_res.equity_value, currency),
+           formula=f"valor ajustado + caja − deuda = {fmt_money(dcf_res.survival_adjusted_value, currency)} + "
+                   f"{fmt_money(cash, currency)} − {fmt_money(debt, currency)}")
 
     g1, g2 = st.columns(2)
     sc, unit = ch.money_scale(proj["Ingresos"])
@@ -845,12 +873,17 @@ with T["DCF"]:
 
 with T["Método VC"]:
     c = st.columns(4)
-    metric(c[0], f"Ingresos año {exit_year}", fmt_money(rev_exit, currency))
+    metric(c[0], f"Ingresos año {exit_year}", fmt_money(rev_exit, currency),
+           formula=f"ingresos actuales × Π (1 + g_t), años 1 a {exit_year}; g se mantiene {hg_years} años y luego baja hasta la tasa estable")
     if exit_basis == "EV/EBITDA":
         metric(c[1], f"EBITDA año {exit_year}", fmt_money(ebitda_exit, currency),
-               help=f"Margen operativo proyectado + D&A/ventas de la industria ({fmt_pct(da_margin)})")
-    metric(c[2 if exit_basis == "EV/EBITDA" else 1], f"Múltiplo {exit_basis}", fmt_mult(exit_multiple), mult_res)
-    metric(c[3 if exit_basis == "EV/EBITDA" else 2], "Valor de salida", fmt_money(vc_res.exit_value, currency))
+               formula=f"ingresos del año {exit_year} × (margen operativo proyectado + D&A / ventas de la industria); "
+                       f"D&A / ventas = EBITDA / ventas − margen operativo de la industria = {fmt_pct(da_margin)}")
+    metric(c[2 if exit_basis == "EV/EBITDA" else 1], f"Múltiplo {exit_basis}", fmt_mult(exit_multiple), mult_res,
+           formula="dato de la industria (o el que pongas en Supuestos anclados en la industria)")
+    metric(c[3 if exit_basis == "EV/EBITDA" else 2], "Valor de salida", fmt_money(vc_res.exit_value, currency),
+           formula=f"{'EBITDA' if exit_basis == 'EV/EBITDA' else 'ingresos'} del año {exit_year} × múltiplo = "
+                   f"{fmt_money(ebitda_exit if exit_basis == 'EV/EBITDA' else rev_exit, currency)} × {fmt_mult(exit_multiple)}")
 
     st.markdown(
         f"**Tratamiento del fracaso:** {vc_mode_label}. Tasa de descuento {fmt_pct(vc_res.discount_rate)}"
@@ -860,20 +893,31 @@ with T["Método VC"]:
     st.latex(r"\text{Post-money} = \frac{\text{Valor de salida} \times (1-\text{dilución})" + (r"\times p" if vc_mode == "survival" else "")
              + r"}{(1+r)^{T}}")
     c = st.columns(4)
-    metric(c[0], "Post-money (método VC)", fmt_money(vc_res.post_money, currency))
+    metric(c[0], "Post-money (método VC)", fmt_money(vc_res.post_money, currency),
+           formula=f"valor de salida × (1 − dilución){' × p' if vc_mode == 'survival' else ''} / (1 + r)^T = "
+                   f"{fmt_money(vc_res.exit_value, currency)} × {fmt_pct(vc_res.retention)}"
+                   f"{' × ' + fmt_pct(vc_res.survival_prob) if vc_mode == 'survival' else ''} / (1 + {fmt_pct(vc_res.discount_rate)})^{exit_year}")
     metric(c[1], "Pre-money (método VC)", fmt_money(vc_res.pre_money, currency),
+           formula=f"post-money − inversión = {fmt_money(vc_res.post_money, currency)} − {fmt_money(terms.investment, currency)}",
            delta=f"Propuesta: {fmt_money(terms.pre_money, currency)}")
     metric(c[2], "Participación necesaria hoy", fmt_pct(vc_res.required_stake),
+           formula=f"inversión / post-money (método VC) = {fmt_money(terms.investment, currency)} / {fmt_money(vc_res.post_money, currency)}",
            delta=f"Ofrecida: {fmt_pct(terms.stake)}")
-    metric(c[3], "Participación a la salida", fmt_pct(vc_res.required_stake_at_exit))
+    metric(c[3], "Participación a la salida", fmt_pct(vc_res.required_stake_at_exit),
+           formula=f"participación necesaria hoy × (1 − dilución) = {fmt_pct(vc_res.required_stake)} × {fmt_pct(vc_res.retention)}")
 
     st.subheader("Retorno con las condiciones propuestas")
     c = st.columns(4)
-    metric(c[0], "Participación a la salida", fmt_pct(deal.stake_exit))
-    metric(c[1], "Cobro a la salida", fmt_money(deal.proceeds, currency))
-    metric(c[2], "MOIC / IRR si hay salida", f"{fmt_mult(deal.moic)} / {fmt_pct(deal.irr)}")
+    metric(c[0], "Participación a la salida", fmt_pct(deal.stake_exit),
+           formula=f"participación ofrecida × (1 − dilución) = {fmt_pct(terms.stake)} × (1 − {fmt_pct(stage['future_dilution'])})")
+    metric(c[1], "Cobro a la salida", fmt_money(deal.proceeds, currency),
+           formula=f"participación a la salida × valor de salida = {fmt_pct(deal.stake_exit)} × {fmt_money(vc_res.exit_value, currency)}")
+    metric(c[2], "MOIC / IRR si hay salida", f"{fmt_mult(deal.moic)} / {fmt_pct(deal.irr)}",
+           formula=f"MOIC = cobro / inversión = {fmt_money(deal.proceeds, currency)} / {fmt_money(terms.investment, currency)}; "
+                   f"IRR anual = MOIC^(1 / {exit_year}) − 1")
     metric(c[3], "MOIC esperado (× supervivencia)", fmt_mult(deal.expected_moic),
-           help=f"Probabilidad de supervivencia {fmt_pct(stage['survival_prob'])}")
+           formula=f"MOIC × p = {fmt_mult(deal.moic)} × {fmt_pct(stage['survival_prob'])}",
+           help="p es la probabilidad de supervivencia de la etapa.")
 
 # ======================================================================= Múltiplos
 
@@ -928,11 +972,18 @@ with T["Monte Carlo"]:
     pm =mc_res.percentiles.get("MOIC si hay salida", mc_res.percentiles["MOIC"])
     pv = mc_res.percentiles.get("Valor DCF si sobrevive", mc_res.percentiles["Valor DCF"])
     c = st.columns(5)
-    metric(c[0], "Prob. de fracaso", fmt_pct(fail), help="1 − probabilidad de supervivencia de la etapa, simulada.")
-    metric(c[1], f"Prob. de MOIC ≥ {fmt_mult(mc.moic_target, 1)}", fmt_pct(mc_res.prob_moic_target), help="Incluye los fracasos.")
-    metric(c[2], "Prob. de perder dinero", fmt_pct(mc_res.prob_loss), help="MOIC < 1x, incluidos los fracasos.")
-    metric(c[3], "MOIC medio", fmt_mult(mc_res.percentiles["MOIC"]["Media"]), help="Incluye los fracasos (MOIC 0x).")
+    metric(c[0], "Prob. de fracaso", fmt_pct(fail),
+           formula=f"simulaciones sin supervivencia / {mc.n_sims:,}; cada una sobrevive con probabilidad p = {fmt_pct(base.survival_prob)}".replace(",", "."))
+    metric(c[1], f"Prob. de MOIC ≥ {fmt_mult(mc.moic_target, 1)}", fmt_pct(mc_res.prob_moic_target),
+           formula=f"simulaciones con MOIC ≥ {fmt_mult(mc.moic_target, 1)} / {mc.n_sims:,}".replace(",", "."),
+           help="Incluye los fracasos (MOIC 0x).")
+    metric(c[2], "Prob. de perder dinero", fmt_pct(mc_res.prob_loss),
+           formula=f"simulaciones con MOIC < 1x / {mc.n_sims:,}".replace(",", "."), help="Incluye los fracasos.")
+    metric(c[3], "MOIC medio", fmt_mult(mc_res.percentiles["MOIC"]["Media"]),
+           formula="media de los MOIC simulados; MOIC = participación × (1 − dilución) × ingresos del año de salida × múltiplo "
+                   "simulado / inversión", help="Incluye los fracasos (MOIC 0x).")
     metric(c[4], "MOIC P50 si hay salida", fmt_mult(pm["P50"]),
+           formula="mediana del MOIC entre las simulaciones en que la empresa sobrevive",
            help=f"P10 {fmt_mult(pm['P10'])} · P90 {fmt_mult(pm['P90'])}")
     if exit_basis == "EV/EBITDA":
         st.caption("La simulación del valor de salida usa EV/Sales de la industria (el EBITDA de salida puede ser negativo en muchas simulaciones).")
@@ -954,11 +1005,17 @@ with T["Monte Carlo"]:
 
 with T["Caja y ronda"]:
     c = st.columns(4)
-    metric(c[0], "Runway actual", f"{fmt_num(runway, 1)} meses")
+    metric(c[0], "Runway actual", f"{fmt_num(runway, 1)} meses",
+           formula=f"caja / burn rate mensual = {fmt_money(cash, currency)} / {fmt_money(burn, currency)}")
     metric(c[1], "Caja que consume el plan (DCF)", fmt_money(dcf_res.capital_need, currency),
-           help="Mínimo del FCFF acumulado: dinero necesario hasta que la empresa genera caja.")
-    metric(c[2], "Déficit tras caja y ronda", fmt_money(funding_gap, currency))
+           formula="− mínimo de Σ FCFF acumulado del año 1 al t (0 si nunca es negativo)",
+           help="Dinero necesario hasta que la empresa genera caja según la proyección del DCF.")
+    metric(c[2], "Déficit tras caja y ronda", fmt_money(funding_gap, currency),
+           formula=f"máx(caja que consume − caja − inversión, 0) = máx({fmt_money(dcf_res.capital_need, currency)} − "
+                   f"{fmt_money(cash, currency)} − {fmt_money(terms.investment, currency)}, 0)")
     metric(c[3], "Dilución adicional implícita", fmt_pct(dil_implied),
+           formula=f"déficit / (post-money + déficit) = {fmt_money(funding_gap, currency)} / ({fmt_money(terms.post_money, currency)} + "
+                   f"{fmt_money(funding_gap, currency)})",
            help="Si el déficit se levantara hoy al post-money propuesto. Cota superior: las rondas futuras suelen tener mayor valoración. "
                 f"Compárala con la dilución futura del supuesto de etapa ({fmt_pct(stage['future_dilution'])}).")
     st.plotly_chart(ch.cash_chart(cash_proj, currency), width="stretch")
@@ -1104,9 +1161,12 @@ with T["Comparables"]:
     if ds == "borme":
         sample = df_all[df_all["industry_std"].isin(inds)] if inds else df_all
         k1, k2, k3 = st.columns(3)
-        metric(k1, "Sociedades en la muestra", f"{len(sample):,}".replace(",", "."))
-        metric(k2, "Constituidas en el periodo", f"{int(sample['constitution_date'].notna().sum()):,}".replace(",", "."))
+        metric(k1, "Sociedades en la muestra", f"{len(sample):,}".replace(",", "."),
+               formula="número de sociedades que cumplen los filtros de industria y estado")
+        metric(k2, "Constituidas en el periodo", f"{int(sample['constitution_date'].notna().sum()):,}".replace(",", "."),
+               formula="sociedades de la muestra con acto de constitución en los últimos 12 meses")
         metric(k3, "Con ampliaciones de capital", f"{int((sample['n_capital_increases'] > 0).sum()):,}".replace(",", "."),
+               formula="sociedades de la muestra con al menos una ampliación de capital inscrita en el periodo",
                help="Señal de que la sociedad ha levantado fondos, aunque el importe nominal no mide la ronda.")
         series = pd.Series(dtype=float)
     elif ds == "sec_form_d":
@@ -1119,9 +1179,12 @@ with T["Comparables"]:
     if ds != "borme":
         pctl = cmp.percentile_of(your, series[series > 0])
         k1, k2, k3 = st.columns(3)
-        metric(k1, f"Empresas en la muestra", f"{int((series > 0).sum()):,}".replace(",", "."))
-        metric(k2, f"Mediana de {what}", fmt_money(float(series[series > 0].median()) / rate, currency) if (series > 0).any() else "n/d")
+        metric(k1, f"Empresas en la muestra", f"{int((series > 0).sum()):,}".replace(",", "."),
+               formula=f"empresas que cumplen los filtros con {what} mayor que 0")
+        metric(k2, f"Mediana de {what}", fmt_money(float(series[series > 0].median()) / rate, currency) if (series > 0).any() else "n/d",
+               formula=f"valor central de {what} en la muestra (la mitad de las empresas está por encima y la otra mitad por debajo)")
         metric(k3, f"Tu {what}: percentil", fmt_pct(pctl, 0) if not math.isnan(pctl) else "n/d",
+               formula=f"empresas de la muestra con {what} menor que el tuyo / empresas de la muestra",
                help=f"Porcentaje de la muestra con {what} menor que el tuyo ({fmt_money(your / rate, currency)}).")
         if (series > 0).sum() >= 10:
             st.plotly_chart(ch.log_histogram(series[series > 0] / rate, f"Distribución de {what} en la muestra",
@@ -1563,12 +1626,16 @@ with T["Fondos"]:
     if len(flows) >= 2 and flows["capital_call"].fillna(0).sum() > 0:
         fm = fund_metrics(flows)
         c = st.columns(6)
-        metric(c[0], "Capital desembolsado", fmt_num(fm.paid_in, 1))
-        metric(c[1], "DPI", fmt_mult(fm.dpi), help="Distribuciones / capital desembolsado")
-        metric(c[2], "RVPI", fmt_mult(fm.rvpi), help="Valor residual (NAV) / capital desembolsado")
-        metric(c[3], "TVPI", fmt_mult(fm.tvpi), help="DPI + RVPI")
-        metric(c[4], "MOIC", fmt_mult(fm.moic), help="(Distribuciones + NAV) / capital desembolsado")
-        metric(c[5], "IRR (XIRR)", fmt_pct(fm.irr), help="Con fechas reales; el último NAV cuenta como valor terminal.")
+        metric(c[0], "Capital desembolsado", fmt_num(fm.paid_in, 1), formula="Σ capital llamado")
+        metric(c[1], "DPI", fmt_mult(fm.dpi), formula=f"Σ distribuciones / capital desembolsado = {fmt_num(fm.distributed, 1)} / {fmt_num(fm.paid_in, 1)}",
+               help="Lo que el fondo ya ha devuelto en efectivo por cada unidad invertida.")
+        metric(c[2], "RVPI", fmt_mult(fm.rvpi), formula=f"último NAV / capital desembolsado = {fmt_num(fm.nav, 1)} / {fmt_num(fm.paid_in, 1)}",
+               help="Lo que aún vale lo que queda en cartera.")
+        metric(c[3], "TVPI", fmt_mult(fm.tvpi), formula=f"DPI + RVPI = {fmt_mult(fm.dpi)} + {fmt_mult(fm.rvpi)}")
+        metric(c[4], "MOIC", fmt_mult(fm.moic), formula="(Σ distribuciones + último NAV) / capital desembolsado")
+        metric(c[5], "IRR (XIRR)", fmt_pct(fm.irr),
+               formula="tasa r que cumple Σ flujo_i / (1 + r)^(días_i / 365) = 0, con llamadas negativas, distribuciones "
+                       "positivas y el último NAV como flujo final", help="Anual, con las fechas reales de cada flujo.")
         st.plotly_chart(ch.jcurve_chart(j_curve(flows), currency), width="stretch")
     else:
         st.warning("Introduce al menos dos fechas y alguna llamada de capital para calcular las métricas.")
@@ -1588,10 +1655,11 @@ with T["Fondos"]:
     })
     pm_f = fund_metrics(proj_flows)
     c = st.columns(4)
-    metric(c[0], "TVPI proyectado", fmt_mult(pm_f.tvpi))
-    metric(c[1], "DPI proyectado", fmt_mult(pm_f.dpi))
-    metric(c[2], "IRR proyectada", fmt_pct(pm_f.irr))
-    metric(c[3], "NAV final", fmt_num(proj_f["NAV"].iloc[-1], 1))
+    metric(c[0], "TVPI proyectado", fmt_mult(pm_f.tvpi), formula="(Σ distribuciones proyectadas + NAV final) / Σ llamadas")
+    metric(c[1], "DPI proyectado", fmt_mult(pm_f.dpi), formula="Σ distribuciones proyectadas / Σ llamadas")
+    metric(c[2], "IRR proyectada", fmt_pct(pm_f.irr), formula="XIRR de los flujos proyectados (llamadas, distribuciones y NAV final)")
+    metric(c[3], "NAV final", fmt_num(proj_f["NAV"].iloc[-1], 1),
+           formula="NAV_t = NAV_t−1 × (1 + g) + llamadas_t − distribuciones_t; distribuciones_t = NAV_t−1 × (1 + g) × (t / vida)^bow")
     st.plotly_chart(ch.jcurve_chart(j_curve(proj_flows), currency), width="stretch")
     with st.expander("Tabla de la proyección"):
         st.dataframe(proj_f.round(2), hide_index=True, width="stretch")
@@ -1602,9 +1670,12 @@ with T["Fondos"]:
     sizes = sizes[sizes > 0]
     fund_size = st.number_input(f"Tamaño de tu fondo ({sym})", 0.0, None, 50_000_000.0, 1_000_000.0, format="%.0f", key="fund_size")
     k1, k2, k3 = st.columns(3)
-    metric(k1, "Vehículos de VC en la muestra", f"{len(sizes):,}".replace(",", "."))
-    metric(k2, "Mediana del tamaño", fmt_money(sizes.median() / usd_rate(currency), currency))
-    metric(k3, "Percentil de tu fondo", fmt_pct(cmp.percentile_of(fund_size * usd_rate(currency), sizes), 0))
+    metric(k1, "Vehículos de VC en la muestra", f"{len(sizes):,}".replace(",", "."),
+           formula="fondos y vehículos de VC con Form D e importe ofrecido o vendido mayor que 0")
+    metric(k2, "Mediana del tamaño", fmt_money(sizes.median() / usd_rate(currency), currency),
+           formula="valor central del importe ofrecido (o vendido, si la oferta era indefinida)")
+    metric(k3, "Percentil de tu fondo", fmt_pct(cmp.percentile_of(fund_size * usd_rate(currency), sizes), 0),
+           formula="vehículos de la muestra más pequeños que tu fondo / vehículos de la muestra")
     st.plotly_chart(ch.log_histogram(sizes / usd_rate(currency), "Tamaño de los vehículos de VC que presentaron Form D",
                                      f"Tamaño ({sym}, escala logarítmica)", {"Tu fondo": fund_size}), width="stretch")
     st.caption("Incluye fondos y vehículos de una sola inversión (SPVs), por eso la mediana es baja. Es contexto de tamaño, "

@@ -126,5 +126,13 @@ def test_active_company_survives_new_session_via_url(tmp_path, monkeypatch):
     assert at.session_state["rev0"] == 2_500_000.0
 
 
+def test_every_metric_tooltip_shows_its_formula():
+    """Cada cifra calculada (tarjeta st.metric) explica en su ? con qué fórmula se obtuvo."""
+    at = run()
+    missing = [m.label for m in at.metric if "Fórmula:" not in (m.proto.help or "")]
+    assert not missing, f"Tarjetas sin fórmula en el ?: {missing}"
+    assert len(at.metric) >= 40
+
+
 def test_vc_survival_mode_and_ebitda_exit():
     run(**{"Tratamiento del riesgo de fracaso": "Costo del equity × supervivencia", "Múltiplo de salida": "EV/EBITDA", "Beta": "De mercado"})
