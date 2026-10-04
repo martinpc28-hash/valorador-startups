@@ -163,7 +163,9 @@ def build(months: int) -> None:
     acts = acts.sort_values("date")
     g = acts.groupby("name", sort=False)
     xw = pd.read_csv(DATA / "industry_crosswalk.csv", dtype=str)
-    bde_xw = xw[xw["source"] == "bde"].set_index("industry_original")["industry_std"].to_dict()
+    # Si un CNAE sirve a varias industrias, la primera fila de la tabla de equivalencias es la principal
+    bde_xw = (xw[xw["source"] == "bde"].drop_duplicates("industry_original", keep="first")
+              .set_index("industry_original")["industry_std"].to_dict())
 
     def first(series):
         s = series.dropna()

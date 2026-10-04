@@ -99,8 +99,10 @@ def build() -> None:
     size_name = {x["id"]: fix_text(x["name"]) for x in cfg["sizes"]}
     assert set(RATIOS) == {r["id"] for r in cfg["ratios"]}, "La lista de ratios del Banco de España ha cambiado"
 
-    xw = pd.read_csv(DATA / "industry_crosswalk.csv", dtype=str)
-    xw = xw[xw["source"] == SOURCE].set_index("industry_original")["industry_std"].to_dict()
+    # Un CNAE puede servir a varias industrias (p. ej. J62 para los dos tipos de software)
+    xw_rows = pd.read_csv(DATA / "industry_crosswalk.csv", dtype=str)
+    xw_rows = xw_rows[xw_rows["source"] == SOURCE]
+    xw = xw_rows.groupby("industry_original", sort=False)["industry_std"].apply(list).to_dict()
     missing = set(xw) - set(sector_name)
     if missing:
         raise SystemExit(f"Sectores CNAE de la tabla de equivalencias que ya no existen: {sorted(missing)}")
@@ -116,23 +118,29 @@ def build() -> None:
                 for y in data.get("years", []):
                     p = (y.get("percentiles") or []) + [None] * 3
                     vals = [v * factor if isinstance(v, (int, float)) else None for v in p[:3]]
-                    rows.append({
-                        "source": SOURCE, "region": "ES", "sector_code": code, "sector_name": sector_name[code],
-                        "industry_std": xw[code], "size_id": size, "size_name": size_name[size], "metric": metric,
-                        "ratio_id": rid, "year": int(y["year"]), "p25": vals[0], "p50": vals[1], "p75": vals[2],
-                        "unit": unit, "as_of": f"{int(y['year'])}-12-31", "retrieved_at": today,
-                        "url": APP_URL, "license": LICENSE,
-                    })
+                    for std in xw[code]:
+                        rows.append({
+                            "source": SOURCE, "region": "ES", "sector_code": code, "sector_name": sector_name[code],
+                            "industry_std": std, "size_id": size, "size_name": size_name[size], "metric": metric,
+                            "ratio_id": rid, "year": int(y["year"]), "p25": vals[0], "p50": vals[1], "p75": vals[2],
+                            "unit": unit, "as_of": f"{int(y['year'])}-12-31", "retrieved_at": today,
+                            "url": APP_URL, "license": LICENSE,
+                        })
                 done += 1
                 if done % 250 == 0:
                     print(f"{done}/{total} consultas", flush=True)
 
     detail = pd.DataFrame(rows)
+    # El servicio devuelve 0 en P25, P50 y P75 cuando no publica el dato (pocas empresas, confidencialidad):
+    # se guarda como sin dato para no comparar contra ceros
+    suppressed = (detail[["p25", "p50", "p75"]] == 0).all(axis=1)
+    detail.loc[suppressed, ["p25", "p50", "p75"]] = None
+    print(f"{int(suppressed.sum())} filas sin dato publicado (0 en los tres valores) marcadas como vacías")
     detail.to_csv(DATA / "bde_ratios.csv", index=False)
 
     # Esquema único: mediana, todos los tamaños, último ejercicio con dato
     latest = (detail[(detail["size_id"] == TOTAL_SIZE) & detail["p50"].notna()]
-              .sort_values("year").groupby(["sector_code", "metric"]).tail(1))
+              .sort_values("year").groupby(["sector_code", "industry_std", "metric"]).tail(1))
     long = pd.DataFrame({
         "source": SOURCE, "region": "ES", "industry_std": latest["industry_std"],
         "industry_original": latest["sector_code"], "metric": latest["metric"], "value": latest["p50"],

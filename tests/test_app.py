@@ -102,5 +102,29 @@ def test_save_company_and_load_into_model(tmp_path, monkeypatch):
     assert not at.exception and not at.error, [e.value for e in at.error]
 
 
+def test_active_company_survives_new_session_via_url(tmp_path, monkeypatch):
+    """Una sesión nueva (reconexión o recarga) con ?empresa=id vuelve a cargar la empresa sola."""
+    monkeypatch.setenv("VALORADOR_STORE", "local")
+    monkeypatch.setenv("VALORADOR_LOCAL_DIR", str(tmp_path))
+    import src.company_store as store_mod
+
+    c = store_mod.new_company("Fija SL")
+    c.update({"id": "fija-sl", "industry": "Drugs (Biotechnology)", "currency": "EUR",
+              "inputs": {"revenue": 2_500_000.0, "growth": 0.4, "current_margin": -0.2}})
+    store_mod.LocalStore(tmp_path).save("compartida", c)
+
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.query_params["empresa"] = "fija-sl"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["active_company"] == "fija-sl"
+    assert at.session_state["rev0"] == 2_500_000.0
+    assert at.session_state["industry"] == "Drugs (Biotechnology)"
+    assert at.session_state["currency"] == "EUR"
+    # y sigue fija tras otra ejecución (cualquier interacción)
+    at.run()
+    assert at.session_state["rev0"] == 2_500_000.0
+
+
 def test_vc_survival_mode_and_ebitda_exit():
     run(**{"Tratamiento del riesgo de fracaso": "Costo del equity × supervivencia", "Múltiplo de salida": "EV/EBITDA", "Beta": "De mercado"})

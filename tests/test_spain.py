@@ -38,15 +38,29 @@ def test_bde_detail_shape_and_units(bde):
     # porcentajes guardados como decimales: la mediana del EBITDA/ventas ronda 0,0x a 0,3
     med = pct[(pct["metric"] == "ebitda_margin") & (pct["sector_code"] == "ZC") & (pct["size_id"] == "0")]["p50"]
     assert med.between(-0.2, 0.5).all()
-    ordered = bde.dropna(subset=["p25", "p50", "p75"])
+    ordered = bde.dropna(subset=["p25", "p50", "p75"]).copy()
     assert ((ordered["p25"] <= ordered["p50"] + 1e-9) & (ordered["p50"] <= ordered["p75"] + 1e-9)).all()
 
 
 def test_bde_sectors_follow_crosswalk(bde):
     xw = load_crosswalk()
-    mapped = xw[xw["source"] == "bde"].set_index("industry_original")["industry_std"].to_dict()
-    assert set(bde["sector_code"]) == set(mapped)
-    assert (bde["sector_code"].map(mapped) == bde["industry_std"]).all()
+    pairs = set(map(tuple, xw[xw["source"] == "bde"][["industry_original", "industry_std"]].values))
+    assert set(map(tuple, bde[["sector_code", "industry_std"]].drop_duplicates().values)) == pairs
+
+
+def test_software_maps_to_j62_and_information_services_to_j63():
+    xw = load_crosswalk()
+    by_std = xw[xw["source"] == "bde"].set_index("industry_std")["industry_original"].to_dict()
+    assert by_std["Software (System & Application)"] == "J62"
+    assert by_std["Software (Internet)"] == "J62"
+    assert by_std["Information Services"] == "J63"
+
+
+def test_bde_suppressed_zeros_are_empty(bde):
+    # el servicio devuelve 0 en los tres valores cuando no publica el dato: no deben quedar así
+    assert not ((bde["p25"] == 0) & (bde["p50"] == 0) & (bde["p75"] == 0)).any()
+    j63_big = bde[(bde["sector_code"] == "J63") & (bde["size_id"].astype(str) == "2")]
+    assert j63_big["p50"].isna().all()
 
 
 def test_bde_is_a_resolver_source_without_changing_defaults():
@@ -82,7 +96,8 @@ def test_borme_industry_from_cnae(borme):
     with_ind = borme.dropna(subset=["industry_std"])
     assert not with_ind.empty
     xw = load_crosswalk()
-    mapped = xw[xw["source"] == "bde"].set_index("industry_original")["industry_std"].to_dict()
+    mapped = (xw[xw["source"] == "bde"].drop_duplicates("industry_original", keep="first")
+              .set_index("industry_original")["industry_std"].to_dict())
     assert (with_ind["cnae_division"].map(mapped) == with_ind["industry_std"]).all()
 
 

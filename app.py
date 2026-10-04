@@ -191,6 +191,10 @@ def load_company(company: dict) -> None:
         st.session_state["industry"] = company["industry"]
     if company.get("stage") in set(stages["stage_label"]):
         st.session_state["stage"] = company["stage"]
+    if company.get("id"):
+        st.session_state["active_company"] = company["id"]
+        st.session_state["lib_pick"] = company["id"]
+        st.query_params["empresa"] = company["id"]
     name = company.get("name", "empresa guardada")
     # Avisa de los campos sin dato: la barra lateral conserva lo que tuviera antes
     st.session_state["prefill_msg"] = name + (f". Sin dato guardado para {', '.join(kept)}: se mantienen los valores "
@@ -198,6 +202,24 @@ def load_company(company: dict) -> None:
 
 
 # ======================================================================= barra lateral
+
+# Empresa activa fijada en la URL (?empresa=id): si la sesión se reinicia (reconexión, recarga o cambio de
+# instancia en Cloud Run) se vuelve a cargar sola, antes de dibujar los widgets.
+if "active_restored" not in st.session_state:
+    st.session_state["active_restored"] = True
+    wanted = st.query_params.get("empresa")
+    if wanted:
+        match = next((c for c in my_companies() if c["id"] == wanted), None)
+        if match:
+            load_company(match)
+        else:
+            st.query_params.pop("empresa", None)
+
+
+def clear_active() -> None:
+    st.session_state.pop("active_company", None)
+    st.query_params.pop("empresa", None)
+
 
 with st.sidebar:
     st.title("Valorador de Startups")
@@ -218,6 +240,12 @@ with st.sidebar:
                   help="Sustituye las entradas de la barra lateral por las de la empresa guardada.", width="stretch")
         b2.button("🔄", on_click=refresh_library, key="lib_refresh_btn", width="stretch",
                   help="Actualizar la lista (por si alguien guardó una empresa desde otra sesión).")
+        active = by_id.get(st.session_state.get("active_company"))
+        if active:
+            a1, a2 = st.columns([3, 1])
+            a1.caption(f"Empresa activa: **{active['name']}**. Se mantiene en todas las pestañas y al recargar.")
+            a2.button("✖", on_click=clear_active, key="lib_clear_btn", width="stretch",
+                      help="Dejar de fijar esta empresa (los valores de la barra lateral no cambian).")
     else:
         st.caption("Aún no hay empresas guardadas. Créalas en la pestaña **Mis empresas** y pulsa **💾 Guardar**.")
         st.button("🔄 Actualizar lista", on_click=refresh_library, key="lib_refresh_btn")
@@ -412,7 +440,9 @@ with T["Read Me"], st.container(key="readme"):
     st.markdown(
         "Ahí están todas las entradas del modelo, en tres pasos: **1. Contexto** (moneda, industria y etapa), "
         "**2. Tu empresa** y **3. La ronda**. Cualquier cambio recalcula todas las pestañas al instante. Arriba, en "
-        "**📁 Mis empresas**, cargas una empresa guardada. Los **ajustes avanzados** son opcionales y vienen cerrados: "
+        "**📁 Mis empresas**, cargas una empresa guardada: queda fija como empresa activa en todas las pestañas y su "
+        "identificador se guarda en la dirección de la página, así que se recupera sola si recargas o se corta la "
+        "conexión (y puedes compartir ese enlace). Los **ajustes avanzados** son opcionales y vienen cerrados: "
         "proyección y salida, tasas y primas, estructura de capital, método VC, fuentes de datos (por ejemplo, poner el "
         "Banco de España primero) y los supuestos anclados en la industria (margen objetivo, ventas / capital y múltiplo "
         "de salida). Los valores marcados con **?** explican de dónde salen."
@@ -1218,18 +1248,27 @@ with T["Ratios España"]:
         sector = r1.selectbox("Sector CNAE", codes, index=codes.index(default_sector) if default_sector in codes else 0,
                               format_func=lambda c: f"{c} · {sec_names[c]}", key=f"bde_sector_{industry}",
                               help="Por defecto, el sector asociado a la industria elegida en la barra lateral.")
-        size_ids = list(sizes)
+        # Solo tamaños con dato publicado para este sector (el Banco de España no publica tramos con pocas empresas)
+        with_data = set(det[(det["sector_code"] == sector) & det["p50"].notna()]["size_id"].astype(str))
+        size_ids = [s for s in sizes if str(s) in with_data] or list(sizes)
         default_size = size_for_revenue(rev_eur)
-        size_id = r2.selectbox("Tamaño (cifra de negocios)", size_ids, index=size_ids.index(default_size) if default_size in size_ids else 0,
-                               format_func=sizes.get, key=f"bde_size_{default_size}",
+        pick_size = default_size if default_size in size_ids else ("0" if "0" in size_ids else size_ids[0])
+        size_id = r2.selectbox("Tamaño (cifra de negocios)", size_ids, index=size_ids.index(pick_size),
+                               format_func=sizes.get, key=f"bde_size_{sector}_{pick_size}",
                                help="Por defecto, el tramo que corresponde a tus ingresos.")
+        if default_size != pick_size:
+            st.info(f"El Banco de España no publica datos de «{sec_names[sector]}» para el tramo «{sizes.get(default_size)}» "
+                    f"(el de tus ingresos): hay pocas empresas y el dato es confidencial. Se muestra «{sizes.get(pick_size)}».")
+        if not with_data:
+            st.warning("El Banco de España no publica datos de este sector para ningún tamaño.")
         years = sorted(det["year"].unique(), reverse=True)
         year = r3.selectbox("Ejercicio", years, key="bde_year")
         if sector not in bde_xw.values():
             st.caption(f"La industria «{industry}» no tiene un sector CNAE asociado; se muestra el total de empresas.")
 
         employees = st.number_input("Empleados de tu empresa (opcional, para ventas por empleado)", 0, 100000, 0, 1, key="bde_emp")
-        cut = det[(det["sector_code"] == sector) & (det["size_id"] == size_id)]
+        # Un CNAE puede repetirse para varias industrias: una fila por ratio y ejercicio
+        cut = det[(det["sector_code"] == sector) & (det["size_id"] == size_id)].drop_duplicates(["metric", "year"])
         now = cut[cut["year"] == year].set_index("metric")
         mine_vals = {
             "revenue_growth_1y": growth,

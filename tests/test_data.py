@@ -57,9 +57,11 @@ def test_crosswalk_covers_every_industry(metrics):
         mapped = set(xw[xw["source"] == source]["industry_original"])
         missing = set(grp["industry_original"]) - mapped
         assert not missing, f"{source}: industrias sin equivalencia {missing}"
-        # y el industry_std guardado coincide con la tabla de equivalencias
-        m = xw[xw["source"] == source].set_index("industry_original")["industry_std"]
-        assert (grp["industry_original"].map(m) == grp["industry_std"]).all()
+        # y cada par (clasificación original, industry_std) guardado existe en la tabla de equivalencias
+        # (un mismo código puede servir a varias industrias, p. ej. J62 para los dos tipos de software)
+        pairs = set(map(tuple, xw[xw["source"] == source][["industry_original", "industry_std"]].values))
+        used = set(map(tuple, grp[["industry_original", "industry_std"]].drop_duplicates().values))
+        assert used <= pairs, f"{source}: pares sin equivalencia {used - pairs}"
 
 
 def test_industry_count_matches_source_pages(metrics):

@@ -34,4 +34,4 @@ def size_for_revenue(rev_eur: float) -> str:
 
 def load_detail() -> pd.DataFrame:
     path = DATA / "bde_ratios.csv"
-    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+    return pd.read_csv(path, dtype={"size_id": str, "sector_code": str}) if path.exists() else pd.DataFrame()
