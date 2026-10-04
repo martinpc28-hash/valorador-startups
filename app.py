@@ -171,20 +171,30 @@ def load_company(company: dict) -> None:
         st.session_state["currency"] = company["currency"]
     money_keys = {"revenue": "rev0", "burn": "burn", "cash": "cash", "investment": "inv", "pre_money": "pre",
                   "debt": "debt", "nol": "nol"}
+    labels = {"revenue": "ingresos", "burn": "burn rate", "cash": "caja", "investment": "inversión", "pre_money": "pre-money",
+              "debt": "deuda", "nol": "pérdidas fiscales", "growth": "crecimiento", "current_margin": "margen operativo"}
+    kept = []
     for field, key in money_keys.items():
         # Inversión y pre-money a 0 = sin dato: no se cargan (la ronda exige importes positivos)
         if inp.get(field) is not None and not (field in ("investment", "pre_money") and not inp[field]):
             st.session_state[key] = float(inp[field])
+        elif field in ("revenue", "burn", "cash", "investment", "pre_money"):
+            kept.append(labels[field])
     for field, key in {"growth": "growth", "current_margin": "cm"}.items():
         if inp.get(field) is not None:
             st.session_state[key] = round(float(inp[field]) * 100, 2)
+        else:
+            kept.append(labels[field])
     if inp.get("investment") and inp.get("pre_money"):
         st.session_state["solve_for"] = "Participación"
     if company.get("industry") in set(industries["industry_std"]):
         st.session_state["industry"] = company["industry"]
     if company.get("stage") in set(stages["stage_label"]):
         st.session_state["stage"] = company["stage"]
-    st.session_state["prefill_msg"] = company.get("name", "empresa guardada")
+    name = company.get("name", "empresa guardada")
+    # Avisa de los campos sin dato: la barra lateral conserva lo que tuviera antes
+    st.session_state["prefill_msg"] = name + (f". Sin dato guardado para {', '.join(kept)}: se mantienen los valores "
+                                              "actuales, ajústalos tú" if kept else "")
 
 
 # ======================================================================= barra lateral
@@ -332,19 +342,6 @@ with T["Read Me"]:
         "**?** de cada número o abre la pestaña **Datos y fuentes**."
     )
     st.warning("Es una herramienta educativa y de análisis. No es asesoramiento de inversión.", icon="⚠️")
-
-    st.subheader("Qué hace este servidor")
-    st.markdown(
-        "- La app está escrita en Python con Streamlit y se ejecuta en **Google Cloud Run**, en la región de Madrid "
-        "(europe-southwest1). Cuando nadie la usa se apaga sola, así que no genera coste en reposo.\n"
-        "- Los datos de mercado e industria están guardados como archivos CSV dentro del propio proyecto. "
-        "La app **no descarga nada mientras la usas**: funciona igual sin conexión a internet.\n"
-        "- Las empresas que guardas en **Mis empresas** se almacenan en **Firestore**, la base de datos de Google "
-        "Cloud del mismo proyecto. Por ahora la biblioteca es compartida: cualquiera con el enlace puede verla.\n"
-        "- De los estados financieros que subes solo se guardan las cifras extraídas, nunca el archivo.\n"
-        "- El código está en GitHub. Cada cambio en la rama principal pasa las pruebas automáticas y, si todas "
-        "pasan, se publica solo una nueva versión."
-    )
 
     st.subheader("Cómo empezar")
     st.markdown(
@@ -1472,9 +1469,9 @@ with T["Mis empresas"]:
         st.subheader("Tu biblioteca")
         st.dataframe(pd.DataFrame([{
             "Empresa": c["name"], "Industria": c.get("industry"), "Etapa": c.get("stage"), "Moneda": c.get("currency"),
-            "Ingresos": fmt_num((c.get("inputs") or {}).get("revenue") or 0, 0),
-            "Crecimiento": fmt_pct((c.get("inputs") or {}).get("growth") or 0),
-            "Margen operativo": fmt_pct((c.get("inputs") or {}).get("current_margin") or 0),
+            "Ingresos": fmt_num((c.get("inputs") or {}).get("revenue"), 0) if (c.get("inputs") or {}).get("revenue") is not None else "n/d",
+            "Crecimiento": fmt_pct((c.get("inputs") or {}).get("growth")) if (c.get("inputs") or {}).get("growth") is not None else "n/d",
+            "Margen operativo": fmt_pct((c.get("inputs") or {}).get("current_margin")) if (c.get("inputs") or {}).get("current_margin") is not None else "n/d",
             "Actualizada": (c.get("updated_at") or "")[:10],
         } for c in lib]), hide_index=True, width="stretch")
         import json as _json
