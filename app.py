@@ -202,8 +202,7 @@ def load_company(company: dict) -> None:
         st.session_state["stage"] = company["stage"]
     # Borrador del memo guardado con la empresa (o se limpia el de la empresa anterior)
     draft = company.get("memo") or {}
-    for field, key in {"analyst": "memo_analyst", "fund": "memo_fund", "recommendation": "memo_reco",
-                       "thesis": "memo_thesis", "description": "memo_desc", "use_of_funds": "memo_use",
+    for field, key in {"recommendation": "memo_reco", "thesis": "memo_thesis", "description": "memo_desc", "use_of_funds": "memo_use",
                        "risks": "memo_risks", "next_steps": "memo_next"}.items():
         if draft.get(field) is not None:
             st.session_state[key] = draft[field]
@@ -435,8 +434,9 @@ with T["Read Me"], st.container(key="readme"):
     tabs_doc = [
         ("Resumen", "Muestra el rango de valor de cada método (DCF, método VC, múltiplos y Monte Carlo) frente a la "
          "pre-money propuesta, y dice si la propuesta queda por debajo, dentro o por encima de ese rango."),
-        ("Memo", "Prepara el memo de inversión para el comité. La app rellena todas las cifras, tablas y gráficos con el "
-         "análisis actual y propone los riesgos que detecta (runway corto, déficit de financiación, precio fuera de rango, "
+        ("Memo", "Prepara un memo de inversión estándar, sin firma, para el comité. La app rellena todas las cifras, "
+         "seis gráficos y una lectura analítica de cada bloque (precio frente a los métodos, retorno frente al objetivo, "
+         "riesgo, caja y escenarios) con el análisis actual y propone los riesgos que detecta (runway corto, déficit de financiación, precio fuera de rango, "
          "múltiplos agresivos…). Tú añades la recomendación, la tesis, la descripción, el uso de fondos y los próximos pasos. "
          "Se descarga en PDF para circularlo, en Word para editarlo y en Excel para rehacer los números, con un anexo de "
          "supuestos, fórmulas y fuentes. El borrador se puede guardar con la empresa activa."),
@@ -1989,7 +1989,7 @@ with T["Fondos"]:
 
 # ======================================================================= Memo de inversión
 
-MEMO_KEYS = {"analyst": "memo_analyst", "fund": "memo_fund", "recommendation": "memo_reco", "thesis": "memo_thesis",
+MEMO_KEYS = {"recommendation": "memo_reco", "thesis": "memo_thesis",
              "description": "memo_desc", "use_of_funds": "memo_use", "risks": "memo_risks", "next_steps": "memo_next"}
 
 
@@ -2087,7 +2087,7 @@ def build_memo_context() -> memo_mod.MemoContext:
     pm_ = mc_res.percentiles.get("MOIC si hay salida", mc_res.percentiles["MOIC"])
     ctx = memo_mod.MemoContext(
         company=(active["name"] if active else ss.get("memo_company") or "Startup analizada"),
-        analyst=ss.get("memo_analyst", ""), fund=ss.get("memo_fund", ""), recommendation=ss.get("memo_reco", "Seguir analizando"),
+        recommendation=ss.get("memo_reco", "Seguir analizando"),
         thesis=ss.get("memo_thesis", ""), description=ss.get("memo_desc", ""), use_of_funds=ss.get("memo_use", ""),
         risks=_lines(ss.get("memo_risks", "")), next_steps=_lines(ss.get("memo_next", "")),
         currency=currency, industry=industry, sector=sector_of[industry], stage=stage_label,
@@ -2097,7 +2097,7 @@ def build_memo_context() -> memo_mod.MemoContext:
         future_dilution=float(stage["future_dilution"]), survival_prob=float(stage["survival_prob"]), target_irr=float(stage["target_irr"]),
         verdict_title=verdict[0], lo_mid=lo_mid, hi_mid=hi_mid, ff_rows=ff_rows,
         dcf_equity=dcf_res.equity_value, dcf_operating=dcf_res.operating_value, dcf_pv_fcff=dcf_res.pv_fcff,
-        dcf_pv_terminal=dcf_res.pv_terminal, cost_of_equity=dr.cost_of_equity, cost_of_capital=dr.cost_of_capital,
+        dcf_pv_terminal=dcf_res.pv_terminal, dcf_survival_value=dcf_res.survival_adjusted_value, cost_of_equity=dr.cost_of_equity, cost_of_capital=dr.cost_of_capital,
         mature_coc=mature_coc, beta_used=dr.beta_used, beta_type=dr.beta_type, stable_growth=dcf_res.stable_growth_used,
         projection=proj, top_sensitivity=top,
         exit_year=exit_year, exit_basis=exit_basis, exit_multiple=exit_multiple,
@@ -2105,11 +2105,12 @@ def build_memo_context() -> memo_mod.MemoContext:
         vc_mode=("IRR objetivo de la etapa" if vc_mode == "irr" else "coste del equity por supervivencia"),
         vc_pre_money=vc_res.pre_money, vc_post_money=vc_res.post_money, required_stake=vc_res.required_stake,
         moic=deal.moic, irr=deal.irr, expected_moic=deal.expected_moic, stake_exit=deal.stake_exit, proceeds=deal.proceeds,
-        multiples=mult, illiquidity_discount=illiq_disc, scenarios=scen,
+        multiples=mult, illiquidity_discount=illiq_disc, scenarios=scen, scenarios_raw=sc_res,
         mc_prob_fail=float(1 - mc_res.survived.mean()), mc_prob_target=mc_res.prob_moic_target, mc_prob_loss=mc_res.prob_loss,
         mc_moic_mean=mc_res.percentiles["MOIC"]["Media"], mc_moic_pct=pm_, mc_target=mc.moic_target,
         mc_moic=mc_res.moic, mc_survived=mc_res.survived, mc_sims=mc.n_sims,
         capital_need=dcf_res.capital_need, funding_gap=funding_gap, implied_dilution=dil_implied,
+        cash_projection=cash_proj, cash_includes_round=bool(add_round),
         spain=spain, spain_label=spain_label, comparables=comps,
         assumptions=assumptions, provenance=provenance, data_warnings=list(dict.fromkeys(warnings)),
         result_notes=[n.as_text(currency) for n in diag_notes],
@@ -2141,9 +2142,9 @@ def memo_save_draft() -> None:
 
 with T["Memo"]:
     st.subheader("Memo de inversión")
-    st.caption("Pensado para el comité: la app rellena todas las cifras, tablas y gráficos con el análisis actual; tú añades "
-               "la recomendación, la tesis y el contexto. Se descarga en PDF para circularlo, en Word para editarlo y en Excel "
-               "para rehacer los números.")
+    st.caption("Memo estándar para el comité, sin firma: la app rellena las cifras, seis gráficos y una lectura analítica "
+               "de cada bloque con el análisis actual; tú añades la recomendación, la tesis y el contexto. Se descarga en PDF "
+               "para circularlo, en Word para editarlo y en Excel para rehacer los números.")
     if st.session_state.get("memo_msg"):
         msg = st.session_state.pop("memo_msg")
         st.success(msg)
@@ -2163,10 +2164,7 @@ with T["Memo"]:
                                                        "lateral para que el memo lleve su nombre y puedas guardar el borrador.]"))
     if not _active_co:
         st.text_input("Nombre de la empresa en el memo", key="memo_company", placeholder="Startup analizada")
-    a1, a2, a3 = st.columns([2, 2, 2])
-    a1.text_input("Analista", key="memo_analyst")
-    a2.text_input("Fondo", key="memo_fund")
-    a3.selectbox("Recomendación", memo_mod.RECOMMENDATIONS, key="memo_reco")
+    st.selectbox("Recomendación", memo_mod.RECOMMENDATIONS, key="memo_reco")
     st.text_area("Tesis de inversión", key="memo_thesis", height=110,
                  placeholder="Por qué esta empresa, por qué ahora y por qué este equipo. Mercado, ventaja competitiva y tracción.")
     st.text_area("Descripción de la empresa", key="memo_desc", height=90,
@@ -2223,6 +2221,8 @@ with T["Memo"]:
                         st.markdown("\n".join(f"- {it}" for it in blk))
                     elif isinstance(blk, memo_mod.Table):
                         st.dataframe(pd.DataFrame(blk.rows, columns=blk.columns), hide_index=True, width="stretch")
+                    elif isinstance(blk, memo_mod.Insight):
+                        st.info(f"**{blk.title}**\n\n" + "\n".join(f"- {it}" for it in blk.lines), icon=":material/insights:")
                     elif isinstance(blk, memo_mod.Figure):
                         st.image(blk.png, caption=blk.caption or None, width="stretch")
 

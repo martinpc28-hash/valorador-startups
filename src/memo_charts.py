@@ -117,5 +117,82 @@ def moic_distribution(moic: np.ndarray, survived: np.ndarray, target: float) -> 
     return _png(fig)
 
 
+def dcf_bridge(pv_fcff: float, pv_terminal: float, survival_adj: float, net_cash: float, equity: float, sym: str) -> bytes:
+    """Del valor de los flujos al equity: cascada con cada paso del DCF."""
+    steps = [("Flujos 10 años", pv_fcff), ("Valor terminal", pv_terminal), ("Ajuste por fracaso", survival_adj),
+             ("Caja menos deuda", net_cash)]
+    sc, unit = _scale([abs(v) for _, v in steps] + [abs(equity), abs(pv_fcff + pv_terminal)])
+    fig, ax = plt.subplots(figsize=(7.2, 2.6))
+    run = 0.0
+    for i, (name, v) in enumerate(steps):
+        ax.bar(i, v / sc, bottom=run / sc, color=BLUE if v >= 0 else RED, width=0.6)
+        ax.annotate(_num(v / sc), (i, (run + max(v, 0)) / sc), xytext=(0, 3), textcoords="offset points",
+                    ha="center", fontsize=8, color=INK_2)
+        run += v
+    ax.bar(len(steps), equity / sc, color=ORANGE, width=0.6)
+    ax.annotate(_num(equity / sc), (len(steps), max(equity, 0) / sc), xytext=(0, 3), textcoords="offset points",
+                ha="center", fontsize=8, color=INK_2)
+    if abs(run - equity) > 1e-6 * max(1.0, abs(run)):  # suelo de 0 en el equity (responsabilidad limitada)
+        ax.annotate(f"suelo en 0 (antes {_num(run / sc)})", (len(steps), 0), xytext=(0, -14), textcoords="offset points",
+                    ha="center", fontsize=7.5, color=RED)
+    ax.axhline(0, color=GRID, linewidth=0.8)
+    tops = np.cumsum([v for _, v in steps]).tolist() + [equity, 0.0]
+    lo, hi = min(tops + [0.0]) / sc, max(tops + [pv_fcff + max(pv_terminal, 0)]) / sc
+    ax.set_ylim(lo - 0.12 * (hi - lo), hi + 0.2 * (hi - lo))  # sitio para las etiquetas sobre las barras
+    ax.set_xticks(range(len(steps) + 1), [n for n, _ in steps] + ["Equity DCF"], fontsize=8)
+    ax.set_ylabel(f"{unit} {sym}")
+    ax.grid(axis="y", color=GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.set_title("Del DCF al valor del equity")
+    return _png(fig)
+
+
+def scenarios(names: list[str], series: dict[str, list[float]], pre_money: float, sym: str) -> bytes:
+    """Valor por escenario y método (barras agrupadas) frente a la pre-money propuesta."""
+    sc, unit = _scale([v for vs in series.values() for v in vs if np.isfinite(v)] + [pre_money])
+    fig, ax = plt.subplots(figsize=(7.2, 2.6))
+    colors = [BLUE, BLUE_LIGHT, INK_2]
+    w = 0.8 / max(len(series), 1)
+    x = np.arange(len(names))
+    for k, (label, vals) in enumerate(series.items()):
+        ax.bar(x + (k - (len(series) - 1) / 2) * w, np.nan_to_num(np.asarray(vals, dtype=float)) / sc, width=w,
+               color=colors[k % len(colors)], label=label)
+    ax.axhline(pre_money / sc, color=ORANGE, linewidth=1.6, label="Pre-money propuesta")
+    ax.set_xticks(x, names)
+    ax.set_ylabel(f"{unit} {sym}")
+    ax.legend(fontsize=7.5, frameon=False, ncol=len(series) + 1, loc="upper center", bbox_to_anchor=(0.5, -0.12))
+    ax.grid(axis="y", color=GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.set_title("Valor por escenario")
+    return _png(fig)
+
+
+def cash_runway(months, cash, sym: str, round_month: int | None = None, breakeven: int | None = None) -> bytes:
+    """Caja mes a mes y el momento en que se agota."""
+    months, cash = np.asarray(months), np.asarray(cash, dtype=float)
+    sc, unit = _scale(cash)
+    fig, ax = plt.subplots(figsize=(7.2, 2.3))
+    ax.plot(months, cash / sc, color=BLUE, linewidth=1.8)
+    ax.fill_between(months, cash / sc, 0, where=cash < 0, color=RED, alpha=0.15, linewidth=0)
+    ax.axhline(0, color=INK_2, linewidth=0.9)
+    out = np.flatnonzero(cash < 0)
+    if len(out):
+        m0 = int(months[out[0]])
+        ax.axvline(m0, color=RED, linewidth=1, linestyle="--")
+        ax.annotate(f"Sin caja en el mes {m0}", (m0, ax.get_ylim()[1] * 0.85), xytext=(4, 0), textcoords="offset points",
+                    fontsize=8, color=RED)
+    if breakeven is not None and not len(out):
+        i = int(np.argmin(np.abs(months - breakeven)))
+        ax.scatter([months[i]], [cash[i] / sc], color=ORANGE, s=30, zorder=3)
+        ax.annotate(f"Equilibrio de caja: mes {breakeven}", (months[i], cash[i] / sc), xytext=(6, -12),
+                    textcoords="offset points", fontsize=8, color=INK_2)
+    ax.set_xlabel("Meses desde hoy")
+    ax.set_ylabel(f"{unit} {sym}")
+    ax.grid(axis="y", color=GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.set_title("Caja proyectada" + (" (incluye esta ronda)" if round_month is not None else ""))
+    return _png(fig)
+
+
 def is_png(data: bytes) -> bool:
     return isinstance(data, (bytes, bytearray)) and data[:8] == b"\x89PNG\r\n\x1a\n"

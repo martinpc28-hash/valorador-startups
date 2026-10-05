@@ -1,8 +1,9 @@
 """Memo de inversión para un comité de VC: contenido, riesgos automáticos y exportación a PDF, Word y Excel.
 
-El analista escribe la parte cualitativa (recomendación, tesis, descripción, uso de fondos, riesgos y próximos
-pasos). La app rellena las cifras, tablas y gráficos con los resultados del modelo. Los tres formatos salen
-de la misma estructura (`Memo`), así que dicen exactamente lo mismo.
+Formato estándar y anónimo (sin firma de analista ni de fondo). La app rellena cifras, tablas y gráficos con
+los resultados del modelo y añade una lectura analítica de cada bloque (src/memo_analysis.py); el usuario aporta
+la parte cualitativa (recomendación, tesis, descripción, uso de fondos, riesgos y próximos pasos). Los tres
+formatos salen de la misma estructura (`Memo`), así que dicen exactamente lo mismo.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import matplotlib
 import numpy as np
 import pandas as pd
 
+from src import memo_analysis as ma
 from src import memo_charts as mc
 from src.charts import fmt_money, fmt_mult, fmt_num, fmt_pct
 
@@ -80,6 +82,7 @@ class MemoContext:
     dcf_operating: float = math.nan
     dcf_pv_fcff: float = math.nan
     dcf_pv_terminal: float = math.nan
+    dcf_survival_value: float = math.nan  # valor operativo ajustado por supervivencia, antes de caja, deuda y suelo
     cost_of_equity: float = math.nan
     cost_of_capital: float = math.nan
     mature_coc: float = math.nan
@@ -108,6 +111,7 @@ class MemoContext:
     multiples: pd.DataFrame | None = None
     illiquidity_discount: float = math.nan
     scenarios: pd.DataFrame | None = None
+    scenarios_raw: pd.DataFrame | None = None  # mismas cifras sin formatear (para el gráfico y la lectura)
     mc_prob_fail: float = math.nan
     mc_prob_target: float = math.nan
     mc_prob_loss: float = math.nan
@@ -121,6 +125,8 @@ class MemoContext:
     capital_need: float = math.nan
     funding_gap: float = math.nan
     implied_dilution: float = math.nan
+    cash_projection: pd.DataFrame | None = None  # Mes, Ingresos, Costos, Consumo de caja, Caja
+    cash_includes_round: bool = True
     # Sector y comparables
     spain: pd.DataFrame | None = None
     spain_label: str = ""
@@ -198,9 +204,21 @@ class Figure:
 
 
 @dataclass
+class Insight:
+    """Lectura analítica: interpreta las cifras del bloque anterior."""
+
+    lines: list[str]
+    title: str = "Lectura analítica"
+
+
+@dataclass
 class Section:
     title: str
-    blocks: list = field(default_factory=list)  # str (párrafo) | Sub | list[str] (viñetas) | Table | Figure
+    blocks: list = field(default_factory=list)  # str (párrafo) | Sub | list[str] (viñetas) | Table | Figure | Insight
+
+    def read(self, lines: list[str]) -> None:
+        if lines:
+            self.blocks.append(Insight(list(lines)))
 
 
 @dataclass
@@ -241,6 +259,8 @@ def build_memo(c: MemoContext) -> Memo:
         (f"Probabilidad de MOIC de {fmt_mult(c.mc_target, 1)} o más", p(c.mc_prob_target, 0)),
         ("Runway actual", f"{fmt_num(c.runway, 1)} meses" if _ok(c.runway) else "n/d"),
     ]))
+    if kp := ma.key_points(c):
+        s.blocks.append(Insight(kp, "Puntos clave"))
     if c.thesis.strip():
         s.blocks.append(Sub("Tesis de inversión"))
         s.blocks.append(c.thesis.strip())
@@ -256,6 +276,7 @@ def build_memo(c: MemoContext) -> Memo:
         ("Margen operativo actual", p(c.current_margin)), ("Burn rate mensual", m(c.burn)),
         ("Caja", m(c.cash)), ("Deuda financiera", m(c.debt)),
     ]))
+    s.read(ma.read_company(c))
     sections.append(s)
 
     # 3. La ronda
@@ -265,6 +286,7 @@ def build_memo(c: MemoContext) -> Memo:
         ("Participación al entrar", p(c.stake)), ("Dilución futura supuesta hasta la salida", p(c.future_dilution)),
         ("Participación a la salida", p(c.stake_exit)),
     ]))
+    s.read(ma.read_round(c))
     if c.use_of_funds.strip():
         s.blocks.append(Sub("Uso de los fondos"))
         s.blocks.append(c.use_of_funds.strip())
@@ -278,6 +300,8 @@ def build_memo(c: MemoContext) -> Memo:
     if c.ff_rows and _ok(c.pre_money):
         s.blocks.append(Figure(mc.football_field(c.ff_rows, c.pre_money, sym),
                                "Rango de valor de cada método; el punto es el valor central y la línea naranja, la pre-money propuesta."))
+    s.read(ma.read_valuation(c))
+    s.blocks.append(Sub("Descuento de flujos (DCF)"))
     s.blocks.append(f"DCF. Equity de {m(c.dcf_equity)}: valor operativo de {m(c.dcf_operating)} (flujos de 10 años {m(c.dcf_pv_fcff)} "
                     f"y valor terminal {m(c.dcf_pv_terminal)}), ajustado por una probabilidad de supervivencia del {p(c.survival_prob, 0)}. "
                     f"Tasa de descuento inicial del {p(c.cost_of_capital)} (beta {c.beta_type} de {fmt_num(c.beta_used, 2) if _ok(c.beta_used) else 'n/d'}, "
@@ -287,10 +311,19 @@ def build_memo(c: MemoContext) -> Memo:
         pr = c.projection
         s.blocks.append(Figure(mc.projection(pr["Año"].tolist(), pr["Ingresos"].tolist(), pr["Margen operativo"].tolist(),
                                              pr["FCFF"].tolist(), sym), "Proyección del DCF a 10 años."))
+    if _ok(c.dcf_pv_fcff) and _ok(c.dcf_pv_terminal) and _ok(c.dcf_survival_value) and _ok(c.dcf_equity):
+        survival_adj = c.dcf_survival_value - (c.dcf_pv_fcff + c.dcf_pv_terminal)
+        net_cash = (c.cash if _ok(c.cash) else 0.0) - (c.debt if _ok(c.debt) else 0.0)
+        s.blocks.append(Figure(mc.dcf_bridge(c.dcf_pv_fcff, c.dcf_pv_terminal, survival_adj, net_cash, c.dcf_equity, sym),
+                               "Cómo se llega del valor de los flujos al equity: valor actual de 10 años de flujos, valor "
+                               "terminal, ajuste por probabilidad de fracaso y caja neta de deuda."))
+    s.read(ma.read_dcf(c))
+    s.blocks.append(Sub("Método VC"))
     s.blocks.append(f"Método VC. Salida en el año {c.exit_year} por {m(c.exit_value)} ({c.exit_basis} de {x(c.exit_multiple)}), "
                     f"descontada al {p(c.vc_rate)} ({c.vc_mode}) con una dilución futura del {p(c.future_dilution)}: post-money de "
                     f"{m(c.vc_post_money)} y pre-money de {m(c.vc_pre_money)}. Para lograr la rentabilidad objetivo, el fondo necesitaría "
                     f"hoy un {p(c.required_stake)} de la empresa (se ofrece un {p(c.stake)}).")
+    s.read(ma.read_vc(c))
     if c.multiples is not None and not c.multiples.empty:
         s.blocks.append(f"Múltiplos comparables, con un descuento por iliquidez del {p(c.illiquidity_discount, 0)}:")
         s.blocks.append(_df_table(c.multiples, widths=[0.46, 0.12, 0.18, 0.24]))
@@ -304,7 +337,8 @@ def build_memo(c: MemoContext) -> Memo:
     ]))
     pct = c.mc_moic_pct or {}
     s.blocks.append(Sub("Monte Carlo"))
-    s.blocks.append(f"{c.mc_sims:,} simulaciones con semilla fija; crecimiento, margen y múltiplo de salida correlacionados.".replace(",", "."))
+    s.blocks.append(f"{c.mc_sims:,}".replace(",", ".") + " simulaciones con semilla fija; crecimiento, margen y múltiplo de "
+                    "salida correlacionados.")
     s.blocks.append(_kv([
         ("Probabilidad de fracaso", p(c.mc_prob_fail, 0)),
         (f"Probabilidad de MOIC de {fmt_mult(c.mc_target, 1)} o más", p(c.mc_prob_target, 0)),
@@ -316,13 +350,30 @@ def build_memo(c: MemoContext) -> Memo:
         s.blocks.append(Figure(mc.moic_distribution(c.mc_moic, c.mc_survived, c.mc_target),
                                "Solo escenarios con salida; la línea naranja es el MOIC objetivo y la última barra agrupa "
                                "los valores extremos (por encima del percentil 99)."))
+    s.read(ma.read_montecarlo(c))
     if c.scenarios is not None and not c.scenarios.empty:
         s.blocks.append(Sub("Escenarios"))
         s.blocks.append(_df_table(c.scenarios))
+        raw = c.scenarios_raw
+        if raw is not None and not raw.empty and _ok(c.pre_money):
+            series = {lab: raw[col].astype(float).tolist() for col, lab in (
+                ("DCF", "DCF"), ("Método VC (pre-money)", "Método VC"), ("Múltiplos (EV/Sales)", "Múltiplos")) if col in raw}
+            s.blocks.append(Figure(mc.scenarios(raw["Escenario"].tolist(), series, c.pre_money, sym),
+                                   "Valor del equity por escenario y método; la línea naranja es la pre-money propuesta."))
+        s.read(ma.read_scenarios(c))
+    s.blocks.append(Sub("Caja y financiación"))
     s.blocks.append(_kv([
         ("Caja que consume el plan", m(c.capital_need)), ("Déficit tras la caja y esta ronda", m(c.funding_gap)),
         ("Dilución adicional implícita", p(c.implied_dilution)),
     ]))
+    cp = c.cash_projection
+    if cp is not None and not cp.empty:
+        be = cp[cp["Consumo de caja"] <= 0]["Mes"] if "Consumo de caja" in cp else []
+        s.blocks.append(Figure(mc.cash_runway(cp["Mes"].tolist(), cp["Caja"].tolist(), sym, 0 if c.cash_includes_round else None,
+                                              int(be.iloc[0]) if len(be) else None),
+                               f"Caja mes a mes durante {len(cp)} meses con el crecimiento y el consumo actuales"
+                               + (", sumando la inversión de esta ronda." if c.cash_includes_round else ", sin esta ronda.")))
+    s.read(ma.read_cash(c))
     sections.append(s)
 
     # 6. Sector y comparables
@@ -378,12 +429,8 @@ def build_memo(c: MemoContext) -> Memo:
     s.blocks.append(DISCLAIMER)
     sections.append(s)
 
-    meta = {"Empresa": c.company, "Fecha": date}
-    if c.analyst:
-        meta["Analista"] = c.analyst
-    if c.fund:
-        meta["Fondo"] = c.fund
-    meta["Recomendación"] = c.recommendation
+    # Formato estándar: sin firma de analista ni de fondo
+    meta = {"Empresa": c.company, "Fecha": date, "Recomendación": c.recommendation}
     return Memo(f"Memo de inversión: {c.company}", f"{c.industry} · {c.stage} · {c.currency}", meta, sections)
 
 
@@ -493,6 +540,25 @@ def to_pdf(memo: Memo) -> bytes:
                 pdf.ln(1.5)
             elif isinstance(b, Table):
                 table(b)
+            elif isinstance(b, Insight):
+                if pdf.get_y() > pdf.h - 40:
+                    pdf.add_page()
+                pdf.set_fill_color(239, 245, 253)
+                pdf.set_font("DejaVu", "B", 8.8)
+                pdf.set_text_color(*accent)
+                pdf.multi_cell(w, 5.4, f"  {b.title}", fill=True, new_x="LMARGIN", new_y="NEXT")
+                pdf.set_font("DejaVu", "", 8.8)
+                pdf.set_text_color(17, 24, 39)
+                for item in b.lines:  # viñeta con sangría francesa sobre el mismo fondo
+                    h = pdf.multi_cell(w - 9, 4.8, item, dry_run=True, output="HEIGHT")
+                    if pdf.get_y() + h > pdf.h - pdf.b_margin:
+                        pdf.add_page()
+                    y0 = pdf.get_y()
+                    pdf.rect(pdf.l_margin, y0, w, h, "F")
+                    pdf.cell(9, 4.8, "    •")
+                    pdf.multi_cell(w - 9, 4.8, item, align="L", new_x="LMARGIN", new_y="NEXT")
+                pdf.cell(w, 1.5, "", fill=True, new_x="LMARGIN", new_y="NEXT")
+                pdf.ln(2.5)
             elif isinstance(b, Figure):
                 img = io.BytesIO(b.png)
                 if pdf.get_y() > pdf.h - 85:
@@ -563,6 +629,14 @@ def to_docx(memo: Memo) -> bytes:
                     doc.add_paragraph(item, style="List Bullet")
             elif isinstance(b, Table):
                 table(b)
+            elif isinstance(b, Insight):
+                head = doc.add_paragraph()
+                head.paragraph_format.space_after = Pt(2)
+                run = head.add_run(b.title)
+                run.bold = True
+                run.font.color.rgb = accent
+                for item in b.lines:
+                    doc.add_paragraph(item, style="List Bullet")
             elif isinstance(b, Figure):
                 doc.add_picture(io.BytesIO(b.png), width=Cm(17))
                 if b.caption:
@@ -605,6 +679,11 @@ def to_xlsx(c: MemoContext, memo: Memo) -> bytes:
         if c.provenance is not None:
             c.provenance.to_excel(xl, sheet_name="Fuentes", index=False)
         pd.DataFrame({"Riesgos": c.risks or [""]}).to_excel(xl, sheet_name="Riesgos", index=False)
+        reading = [(sec.title, b.title, line) for sec in memo.sections for b in sec.blocks
+                   if isinstance(b, Insight) for line in b.lines]
+        if reading:
+            pd.DataFrame(reading, columns=["Sección", "Bloque", "Lectura"]).to_excel(
+                xl, sheet_name="Lectura analítica", index=False)
         for ws in xl.book.worksheets:  # ancho de columnas legible
             for col in ws.columns:
                 width = max(len(str(cell.value)) if cell.value is not None else 0 for cell in col)
@@ -628,6 +707,9 @@ def memo_text(memo: Memo) -> str:
             elif isinstance(b, Table):
                 parts.extend(b.columns)
                 parts.extend(v for r in b.rows for v in r)
+            elif isinstance(b, Insight):
+                parts.append(b.title)
+                parts.extend(b.lines)
             elif isinstance(b, Figure):
                 parts.append(b.caption)
     return "\n".join(parts)

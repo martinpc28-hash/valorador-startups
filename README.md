@@ -12,7 +12,7 @@ Aplicación web (Streamlit) que valora una startup a partir de las variables que
 | Pestaña | Contenido |
 |---|---|
 | **Resumen** | Rango de valor por método frente a la pre-money propuesta, con un veredicto (por debajo, dentro o por encima del rango) |
-| **Memo** | Memo de inversión para el comité. La app rellena cifras, tablas y gráficos con el análisis y propone los riesgos que detecta. El analista añade la recomendación, la tesis, la descripción, el uso de fondos y los próximos pasos. Descarga en PDF, Word y Excel, con un anexo de supuestos, fórmulas y fuentes. El borrador se guarda con la empresa |
+| **Memo** | Memo de inversión estándar y sin firma para el comité. La app rellena cifras, tablas y seis gráficos, añade una lectura analítica de cada bloque y propone los riesgos que detecta. El usuario añade la recomendación, la tesis, la descripción, el uso de fondos y los próximos pasos. Descarga en PDF, Word y Excel, con un anexo de supuestos, fórmulas y fuentes. El borrador se guarda con la empresa |
 | **DCF** | Beta de la industria reapalancada (de mercado o total) y costo de capital. Ingresos que convergen a crecimiento estable, margen que converge al de la industria, reinversión con ventas / capital, pérdidas fiscales acumuladas, valor terminal y ajuste por supervivencia. Mapa de sensibilidad y gráfico de tornado |
 | **Método VC** | Valor de salida (EV/Sales o EV/EBITDA) descontado a la IRR objetivo con dilución futura. Participación necesaria y MOIC/IRR con las condiciones propuestas |
 | **Múltiplos** | EV/Sales y EV/EBITDA de la industria y de la clase de capitalización más pequeña, con descuento por iliquidez |
@@ -157,6 +157,7 @@ src/comparables.py     empresas de la SEC: búsqueda, comparación y precarga
 src/statements.py      lectura de estados financieros (Excel, CSV, PDF)
 src/memo.py            memo de inversión: contenido, riesgos automáticos y exportación a PDF, Word y Excel
 src/memo_charts.py     gráficos estáticos del memo (matplotlib)
+src/memo_analysis.py   lectura analítica del memo: reglas que interpretan las cifras de cada sección
 src/company_store.py   biblioteca de empresas (Firestore o archivo local)
 src/charts.py          gráficos y formato de números
 data/                  CSV con procedencia
