@@ -33,8 +33,11 @@ def xirr(cashflows: list[tuple[dt.date, float]], guess: float = 0.1, tol: float 
     for _ in range(100):
         if rate <= -1:
             break
-        f = sum(v / (1 + rate) ** t for v, t in zip(values, ts))
-        df = sum(-t * v / (1 + rate) ** (t + 1) for v, t in zip(values, ts))
+        try:
+            f = sum(v / (1 + rate) ** t for v, t in zip(values, ts))
+            df = sum(-t * v / (1 + rate) ** (t + 1) for v, t in zip(values, ts))
+        except (OverflowError, ZeroDivisionError):  # Newton se fue cerca de -100 %: pasamos a bisección
+            break
         if df == 0:
             break
         new = rate - f / df
@@ -165,3 +168,53 @@ def load_examples(path=None) -> dict[str, pd.DataFrame]:
 
     df = pd.read_csv(path or ROOT / "data" / "fund_examples.csv")
     return {name: clean_flows(g) for name, g in df.groupby("fund", sort=False)}
+
+
+# Tamaño total de cada fondo precargado (no solo la parte de CalPERS), en millones de USD
+EXAMPLE_META = {
+    "Insight Venture Partners IX (2015)": dict(
+        commitment=100.0, fund_size=3_290.0,
+        size_source="Insight Venture Partners, cierre del fondo IX (11/08/2015): USD 3.290 M"),
+    "Lightspeed Venture Partners Select V (2022)": dict(
+        commitment=100.0, fund_size=2_260.0,
+        size_source="Lightspeed, cierre de Select V (12/07/2022): USD 2.260 M"),
+    "Insight Partners XII (2021)": dict(
+        commitment=600.0, fund_size=20_000.0,
+        size_source="Insight Partners, cierre del fondo XII (24/02/2022): más de USD 20.000 M junto con su fondo de coinversión"),
+}
+
+
+def projection_flows(commitment: float, years: int, growth: float, bow: float, start_year: int = 2026) -> pd.DataFrame:
+    """La proyección en el formato de flujos (una fecha por año) para calcular TVPI, DPI e IRR."""
+    p = project_cash_flows(commitment, years, growth=growth, bow=bow)
+    return pd.DataFrame({
+        "date": pd.to_datetime([f"{start_year + y}-12-31" for y in p["Año"]]),
+        "capital_call": p["Llamadas"], "distribution": p["Distribuciones"], "nav": p["NAV"],
+    })
+
+
+def calibrate_growth(target_irr: float, commitment: float = 100.0, years: int = 12, bow: float = 2.5) -> float:
+    """Crecimiento anual del NAV con el que la proyección da la IRR objetivo (bisección en [-20 %, 50 %])."""
+    lo, hi = -0.2, 0.5
+    irr = lambda g: fund_metrics(projection_flows(commitment, years, g, bow)).irr  # noqa: E731
+    if not (irr(lo) <= target_irr <= irr(hi)):
+        return min(max(target_irr, lo), hi)
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if irr(mid) < target_irr else (lo, mid)
+    return (lo + hi) / 2
+
+
+def calibrate_projection(fm: FundMetrics, commitment: float, bow: float = 2.5) -> tuple[int, float]:
+    """Vida y crecimiento del NAV con los que la proyección reproduce el fondo real.
+
+    El crecimiento se ajusta a la IRR. La vida solo se ajusta al TVPI en fondos maduros (DPI >= 1): en uno
+    joven el TVPI es provisional y se deja la vida típica de 12 años.
+    """
+    if not math.isfinite(fm.irr):
+        return 12, 0.12
+    if fm.dpi < 1:
+        return 12, calibrate_growth(fm.irr, commitment, 12, bow)
+    best = min(range(6, 16), key=lambda y: abs(
+        fund_metrics(projection_flows(commitment, y, calibrate_growth(fm.irr, commitment, y, bow), bow)).tvpi - fm.tvpi))
+    return best, calibrate_growth(fm.irr, commitment, best, bow)

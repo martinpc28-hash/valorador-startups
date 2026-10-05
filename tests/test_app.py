@@ -178,6 +178,9 @@ def test_fund_presets_and_save_to_library(tmp_path, monkeypatch):
     sel.set_value(real)
     at.run()
     assert metric_value(at, "TVPI") == "3,97x" and metric_value(at, "IRR (XIRR)").startswith("22,6")
+    # La parte de abajo sigue al fondo elegido: proyección calibrada y tamaño total real del fondo
+    assert metric_value(at, "TVPI proyectado") == "4,00x" and metric_value(at, "IRR proyectada").startswith("22,6")
+    assert next(n for n in at.number_input if n.label.startswith("Tamaño total del fondo")).value == 3_290_000_000.0
 
     # Guardar una copia con otro nombre y volver a encontrarla en el selector
     next(t for t in at.text_input if t.label == "Nombre del fondo").input("Mi copia de Insight")

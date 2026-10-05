@@ -1834,8 +1834,8 @@ def delete_fund(fund_id: str, name: str) -> None:
 
 
 with T["Fondos"]:
-    st.caption("Análisis de un fondo de VC desde el punto de vista del inversor (LP). Importes en la moneda base, "
-               "en las unidades que prefieras (p. ej. millones).")
+    st.caption("Análisis de un fondo de VC desde el punto de vista del inversor (LP). Los fondos reales van en millones "
+               "de USD; en los tuyos, usa las unidades que prefieras (p. ej. millones).")
 
     # Opciones: ejemplo ilustrativo, fondos reales precargados y fondos guardados por los usuarios
     fund_opts: dict[str, tuple[str, pd.DataFrame, dict]] = {"ej": ("Ejemplo ilustrativo", EXAMPLE_FUND, {})}
@@ -1860,6 +1860,9 @@ with T["Fondos"]:
         getattr(st, msg[0])(msg[1])
 
     label, base_flows, meta = fund_opts[sel]
+    # Fondo real precargado (si no se ha subido un CSV encima): tamaño total, compromiso de CalPERS y unidades
+    real_meta = fnd.EXAMPLE_META.get(sel.split(":", 1)[1], {}) if meta.get("real") and up is None else {}
+    unit_sfx = " (USD M)" if real_meta else ""
     editor_id = f"{sel}_{meta.get('updated_at', '')}"
     save_source, save_id, save_name = f"copia de {label}", None, ""
     if up is not None:
@@ -1904,10 +1907,11 @@ with T["Fondos"]:
         st.caption("Guarda lo que hayas cargado por CSV o editado en la tabla. Si ya existe un fondo con ese nombre, "
                    "se actualiza. La biblioteca es compartida y pública: no guardes datos confidenciales.")
 
+    fm = None
     if len(flows) >= 2 and flows["capital_call"].fillna(0).sum() > 0:
         fm = fund_metrics(flows)
         c = st.columns(6)
-        metric(c[0], "Capital desembolsado", fmt_num(fm.paid_in, 1), formula="Σ capital llamado")
+        metric(c[0], f"Capital desembolsado{unit_sfx}", fmt_num(fm.paid_in, 1), formula="Σ capital llamado")
         metric(c[1], "DPI", fmt_mult(fm.dpi), formula=f"Σ distribuciones / capital desembolsado = {fmt_num(fm.distributed, 1)} / {fmt_num(fm.paid_in, 1)}",
                help="Lo que el fondo ya ha devuelto en efectivo por cada unidad invertida.")
         metric(c[2], "RVPI", fmt_mult(fm.rvpi), formula=f"último NAV / capital desembolsado = {fmt_num(fm.nav, 1)} / {fmt_num(fm.paid_in, 1)}",
@@ -1917,31 +1921,46 @@ with T["Fondos"]:
         metric(c[5], "IRR (XIRR)", fmt_pct(fm.irr),
                formula="tasa r que cumple Σ flujo_i / (1 + r)^(días_i / 365) = 0, con llamadas negativas, distribuciones "
                        "positivas y el último NAV como flujo final", help="Anual, con las fechas reales de cada flujo.")
-        st.plotly_chart(ch.jcurve_chart(j_curve(flows), currency), width="stretch")
+        if real_meta:  # importes en millones de USD: el gráfico los muestra en USD con su escala
+            st.plotly_chart(ch.jcurve_chart(j_curve(flows.assign(
+                **{k: flows[k] * 1e6 for k in ("capital_call", "distribution", "nav")})), "USD"), width="stretch")
+        else:
+            st.plotly_chart(ch.jcurve_chart(j_curve(flows), currency), width="stretch")
     else:
         st.warning("Introduce al menos dos fechas y alguna llamada de capital para calcular las métricas.")
 
     st.subheader("Proyección simple de flujos")
     st.caption("Modelo tipo Takahashi-Alexander (Yale): llamadas según un calendario y distribuciones que crecen con la edad del fondo.")
+    # Valores iniciales tomados del fondo de arriba: su compromiso y el crecimiento que reproduce su IRR
+    commit_0 = real_meta.get("commitment") or (round(fm.paid_in, 1) if fm else 100.0)
+    years_0, growth_0 = 12, 12.0
+    if fm and math.isfinite(fm.irr):
+        years_0, g0 = fnd.calibrate_projection(fm, commit_0)
+        growth_0 = round(g0 * 100, 1)
+        why_life = (f"una vida de {years_0} años, con la que también da su TVPI ({fmt_mult(fm.tvpi)})" if fm.dpi >= 1 else
+                    "la vida típica de 12 años (el fondo aún es joven: su TVPI actual es provisional)")
+        st.caption(f"Valores iniciales tomados del fondo de arriba: compromiso de {fmt_num(commit_0, 1)}{unit_sfx}, "
+                   f"crecimiento del NAV del {fmt_num(growth_0, 1)} % para que la proyección dé su IRR "
+                   f"({fmt_pct(fm.irr)}) y {why_life}. Cambia los valores para ver otros escenarios.")
     p1, p2, p3, p4 = st.columns(4)
-    commitment = p1.number_input("Compromiso", 1.0, 1e12, 100.0, 10.0, key="fund_commit")
-    years_f = p2.slider("Vida del fondo (años)", 6, 15, 12, key="fund_years")
-    growth_f = p3.number_input("Crecimiento anual del NAV (%)", -20.0, 50.0, 12.0, 1.0, key="fund_growth") / 100
+    commitment = p1.number_input(f"Compromiso{unit_sfx}", 1.0, 1e12, float(commit_0), 10.0, key=f"fund_commit_{editor_id}")
+    years_f = p2.slider("Vida del fondo (años)", 6, 15, int(years_0), key=f"fund_years_{editor_id}")
+    growth_f = p3.number_input("Crecimiento anual del NAV (%)", -20.0, 50.0, float(growth_0), 1.0,
+                               key=f"fund_growth_{editor_id}") / 100
     bow = p4.number_input("Factor de distribución (bow)", 0.5, 6.0, 2.5, 0.1, key="fund_bow",
                           help="Mayor = distribuciones más concentradas al final de la vida del fondo.")
     proj_f = project_cash_flows(commitment, years_f, growth=growth_f, bow=bow)
-    proj_flows = pd.DataFrame({
-        "date": pd.to_datetime([f"{2026 + y}-12-31" for y in proj_f["Año"]]),
-        "capital_call": proj_f["Llamadas"], "distribution": proj_f["Distribuciones"], "nav": proj_f["NAV"],
-    })
+    proj_flows = fnd.projection_flows(commitment, years_f, growth_f, bow)
     pm_f = fund_metrics(proj_flows)
     c = st.columns(4)
     metric(c[0], "TVPI proyectado", fmt_mult(pm_f.tvpi), formula="(Σ distribuciones proyectadas + NAV final) / Σ llamadas")
     metric(c[1], "DPI proyectado", fmt_mult(pm_f.dpi), formula="Σ distribuciones proyectadas / Σ llamadas")
     metric(c[2], "IRR proyectada", fmt_pct(pm_f.irr), formula="XIRR de los flujos proyectados (llamadas, distribuciones y NAV final)")
-    metric(c[3], "NAV final", fmt_num(proj_f["NAV"].iloc[-1], 1),
+    metric(c[3], f"NAV final{unit_sfx}", fmt_num(proj_f["NAV"].iloc[-1], 1),
            formula="NAV_t = NAV_t−1 × (1 + g) + llamadas_t − distribuciones_t; distribuciones_t = NAV_t−1 × (1 + g) × (t / vida)^bow")
-    st.plotly_chart(ch.jcurve_chart(j_curve(proj_flows), currency), width="stretch")
+    st.plotly_chart(ch.jcurve_chart(j_curve(proj_flows.assign(
+        **{k: proj_flows[k] * (1e6 if real_meta else 1) for k in ("capital_call", "distribution", "nav")})),
+        "USD" if real_meta else currency), width="stretch")
     with st.expander("Tabla de la proyección"):
         st.dataframe(proj_f.round(2), hide_index=True, width="stretch")
 
@@ -1949,7 +1968,13 @@ with T["Fondos"]:
     funds = load_sec("sec_form_d_funds")
     sizes = funds["total_offering"].fillna(funds["total_sold"])
     sizes = sizes[sizes > 0]
-    fund_size = st.number_input(f"Tamaño de tu fondo ({sym})", 0.0, None, 50_000_000.0, 1_000_000.0, format="%.0f", key="fund_size")
+    size_0 = real_meta["fund_size"] * 1e6 / usd_rate(currency) if real_meta else 50_000_000.0
+    fund_size = st.number_input(f"Tamaño total del fondo ({sym})", 0.0, None, float(round(size_0)), 1_000_000.0,
+                                format="%.0f", key=f"fund_size_{editor_id}",
+                                help="Todo el capital comprometido por los LPs del fondo, no solo lo de un inversor.")
+    if real_meta:
+        st.caption(f"Tamaño real del fondo: {real_meta['size_source']}. La tabla de arriba es solo la parte de CalPERS "
+                   f"(compromiso de USD {fmt_num(real_meta['commitment'], 0)} M), por eso los importes son mucho menores.")
     k1, k2, k3 = st.columns(3)
     metric(k1, "Vehículos de VC en la muestra", f"{len(sizes):,}".replace(",", "."),
            formula="fondos y vehículos de VC con Form D e importe ofrecido o vendido mayor que 0")

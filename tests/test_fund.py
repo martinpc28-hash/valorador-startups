@@ -81,3 +81,23 @@ def test_flows_round_trip_through_records_keeps_values_and_missing_nav():
     pd.testing.assert_frame_equal(back, clean_flows(flows))
     with pytest.raises(ValueError, match="nav"):
         clean_flows(flows.drop(columns="nav"))
+
+
+def test_projection_calibrated_to_a_real_fund_reproduces_its_irr_and_tvpi():
+    from src.fund import EXAMPLE_META, calibrate_projection, load_examples, projection_flows
+
+    ex = load_examples()
+    assert set(EXAMPLE_META) == set(ex)
+    mature = fund_metrics(ex["Insight Venture Partners IX (2015)"])
+    years, g = calibrate_projection(mature, 100.0)
+    proj = fund_metrics(projection_flows(100.0, years, g, 2.5))
+    assert proj.irr == pytest.approx(mature.irr, abs=0.001) and proj.tvpi == pytest.approx(mature.tvpi, abs=0.1)
+    young = fund_metrics(ex["Lightspeed Venture Partners Select V (2022)"])
+    assert calibrate_projection(young, 100.0)[0] == 12  # TVPI provisional: no se fuerza la vida
+
+
+def test_xirr_survives_newton_overflow_near_minus_100_percent():
+    from src.fund import projection_flows
+
+    m = fund_metrics(projection_flows(100.0, 12, -0.2, 2.5))  # fondo que pierde casi todo
+    assert -1 < m.irr < 0
