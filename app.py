@@ -349,12 +349,27 @@ _chips = [f":blue-badge[{industry}]", f":gray-badge[{sector_of[industry]}]", f":
 st.markdown(" ".join(_chips))
 warn_box = st.container()
 
-tab_names = ["Read Me", "Resumen", "DCF", "Método VC", "Múltiplos", "Escenarios", "Monte Carlo", "Caja y ronda",
-             "Comparables", "Ratios España", "Mis empresas", "Fondos", "Supuestos", "Datos y fuentes"]
-TAB_ICONS = {"Read Me": "📖", "Resumen": "🎯", "DCF": "📈", "Método VC": "🚀", "Múltiplos": "✖️", "Escenarios": "🔀",
-             "Monte Carlo": "🎲", "Caja y ronda": "💧", "Comparables": "🔎", "Ratios España": "📊", "Mis empresas": "📁",
-             "Fondos": "🏦", "Supuestos": "⚙️", "Datos y fuentes": "🗂️"}
-T = dict(zip(tab_names, st.tabs([f"{TAB_ICONS.get(n, '')} {n}".strip() for n in tab_names])))
+# Pestañas agrupadas por recorrido de uso. Cada sección sigue escribiendo en T["<nombre>"]; los grupos con
+# varias secciones muestran subpestañas. La etiqueta visible de una subpestaña puede ser distinta de su clave.
+TAB_GROUPS = [
+    ("📖 Read Me", ["Read Me"]),
+    ("🎯 Resumen", ["Resumen"]),
+    ("📈 Valoración", ["DCF", "Método VC", "Múltiplos"]),
+    ("🎲 Riesgo y caja", ["Escenarios", "Monte Carlo", "Caja y ronda"]),
+    ("🔎 Comparables", ["Comparables", "Ratios España"]),
+    ("📁 Mis empresas", ["Mis empresas"]),
+    ("🏦 Fondos", ["Fondos"]),
+    ("⚙️ Supuestos y datos", ["Supuestos", "Datos y fuentes"]),
+]
+SUBTAB_LABELS = {"Comparables": "Empresas", "Supuestos": "Supuestos por etapa"}
+T = {}
+for (_label, _names), _group in zip(TAB_GROUPS, st.tabs([g[0] for g in TAB_GROUPS])):
+    if len(_names) == 1:
+        T[_names[0]] = _group
+    else:
+        with _group:
+            T.update(zip(_names, st.tabs([SUBTAB_LABELS.get(n, n) for n in _names])))
+tab_names = [n for _, names in TAB_GROUPS for n in names]
 
 # ======================================================================= Read Me
 
@@ -385,7 +400,7 @@ with T["Read Me"], st.container(key="readme"):
         "Esta aplicación estima cuánto vale una startup a partir de los datos que introduces en la barra lateral. "
         "Combina cuatro métodos de valoración y los compara con la pre-money que se propone en la ronda. "
         "Todos los supuestos que vienen de fuentes externas muestran su procedencia: pasa el cursor por el icono "
-        "**?** de cada número o abre la pestaña **Datos y fuentes**."
+        "**?** de cada número o abre **Supuestos y datos > Datos y fuentes**."
     )
     st.warning("Es una herramienta educativa y de análisis. No es asesoramiento de inversión.", icon="⚠️")
 
@@ -394,7 +409,8 @@ with T["Read Me"], st.container(key="readme"):
         "1. En la barra lateral elige la **industria**, la **etapa** y la **moneda**.\n"
         "2. Introduce los datos de la empresa: ingresos, crecimiento, margen, burn rate y caja.\n"
         "3. Introduce la ronda: dos de estos tres datos (inversión, pre-money o participación) y la app calcula el tercero.\n"
-        "4. Mira el veredicto en **Resumen** y entra en cada pestaña para ver el detalle.\n"
+        "4. Mira el veredicto en **Resumen** y el detalle en **Valoración** (DCF, método VC y múltiplos) y en "
+        "**Riesgo y caja** (escenarios, Monte Carlo y runway).\n"
         "5. Si quieres, guarda la empresa en **Mis empresas** o compárala con empresas reales en **Comparables**."
     )
 
@@ -441,8 +457,12 @@ with T["Read Me"], st.container(key="readme"):
          "(si se recortó un valor extremo o se usó un dato de reemplazo). También muestra el perfil completo de la "
          "industria y el registro de fuentes."),
     ]
-    for name, text in tabs_doc:
-        st.markdown(f"**{name}.** {text}")
+    docs = dict(tabs_doc)
+    for label, names in TAB_GROUPS[1:]:  # sin el propio Read Me
+        st.markdown(f"#### {label}")
+        for name in names:
+            sub = f"**{SUBTAB_LABELS.get(name, name)}.** " if len(names) > 1 else ""
+            st.markdown(sub + docs[name])
 
     st.subheader("La barra lateral")
     st.markdown(
@@ -490,7 +510,7 @@ with T["Read Me"], st.container(key="readme"):
                  column_config={"Enlace": st.column_config.LinkColumn("Enlace", display_text="abrir")})
     st.markdown(
         "Las fuentes que se investigaron pero aún no se integran (FRED, Kenneth French, Pablo Fernandez, Kroll, Carta, "
-        "PitchBook) están en la pestaña **Datos y fuentes**, con el motivo. Nunca se promedian dos fuentes en silencio: "
+        "PitchBook) están en **Supuestos y datos > Datos y fuentes**, con el motivo. Nunca se promedian dos fuentes en silencio: "
         "si una métrica falta en la fuente preferida se usa la siguiente y la app lo avisa."
     )
 
@@ -755,7 +775,7 @@ with T["Resumen"]:
     icon = {"good": ":material/trending_down:", "warning": ":material/balance:", "critical": ":material/trending_up:"}[verdict[2]]
     box(f"**{verdict[0]}**  \nLa pre-money propuesta es **{fmt_money(terms.pre_money, currency)}** y los valores "
         f"centrales de los métodos van de **{fmt_money(lo_mid, currency)}** a **{fmt_money(hi_mid, currency)}**.", icon=icon)
-    st.caption("Detalle de cada método en sus pestañas; sensibilidad en DCF y probabilidades en Monte Carlo. "
+    st.caption("Detalle de cada método en **Valoración**; sensibilidad en Valoración > DCF y probabilidades en Riesgo y caja > Monte Carlo. "
                "Es una comparación con la pre-money propuesta, no una recomendación de inversión.")
     c = st.columns(5)
     metric(c[0], "Pre-money propuesta", fmt_money(terms.pre_money, currency),
@@ -764,7 +784,7 @@ with T["Resumen"]:
     metric(c[1], "DCF (equity)", fmt_money(dcf_res.equity_value, currency),
            formula=f"equity = máx(p × valor operativo + (1 − p) × recuperación × valor operativo + caja − deuda, 0), con p = "
                    f"{fmt_pct(base.survival_prob)} y valor operativo = {fmt_money(dcf_res.operating_value, currency)}",
-           help="Valor esperado con probabilidad de supervivencia. Detalle en la pestaña DCF.")
+           help="Valor esperado con probabilidad de supervivencia. Detalle en Valoración > DCF.")
     metric(c[2], "Método VC (pre-money)", fmt_money(vc_res.pre_money, currency),
            formula=f"pre-money = valor de salida × (1 − dilución){' × p' if vc_mode == 'survival' else ''} / (1 + r)^T − inversión = "
                    f"{fmt_money(vc_res.exit_value, currency)} × (1 − {fmt_pct(stage['future_dilution'])})"
@@ -828,7 +848,7 @@ with T["DCF"]:
     metric(c[3], "Ajustado por supervivencia", fmt_money(dcf_res.survival_adjusted_value, currency),
            formula=f"p × valor operativo + (1 − p) × recuperación × valor operativo, con p = {fmt_pct(base.survival_prob)} "
                    f"y recuperación = {fmt_pct(base.distress_proceeds)}",
-           help="p es la probabilidad de supervivencia de la etapa (pestaña Supuestos).")
+           help="p es la probabilidad de supervivencia de la etapa (Supuestos y datos > Supuestos por etapa).")
     metric(c[4], "Valor del equity", fmt_money(dcf_res.equity_value, currency),
            formula=f"máx(valor ajustado + caja − deuda, 0) = máx({fmt_money(dcf_res.survival_adjusted_value, currency)} + "
                    f"{fmt_money(cash, currency)} − {fmt_money(debt, currency)}, 0)",
@@ -932,7 +952,7 @@ with T["Método VC"]:
 # ======================================================================= Múltiplos
 
 with T["Múltiplos"]:
-    st.caption(f"Descuento por iliquidez aplicado: {fmt_pct(illiq_disc)} (supuesto de etapa, editable en «Supuestos»). "
+    st.caption(f"Descuento por iliquidez aplicado: {fmt_pct(illiq_disc)} (supuesto de etapa, editable en «Supuestos y datos»). "
                "El EBITDA actual se estima como ingresos × (margen operativo + D&A/ventas de la industria).")
     show = mult_df.copy()
     show["Múltiplo"] = show["Múltiplo"].map(fmt_mult)
