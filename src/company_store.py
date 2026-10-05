@@ -6,6 +6,8 @@ biblioteca. La interfaz acepta un propietario para poder separar usuarios más a
 Dos almacenes con la misma interfaz:
 - FirestoreStore: en producción (Cloud Run). Colección por propietario (hash del nombre).
 - LocalStore: en local y en pruebas, un JSON por usuario en `.local_companies/` (no se versiona).
+
+La misma interfaz guarda otras colecciones (p. ej. "funds", los flujos de fondos que sube el usuario).
 """
 
 from __future__ import annotations
@@ -62,8 +64,9 @@ def _stamp(company: dict) -> dict:
 
 
 class LocalStore:
-    def __init__(self, folder: Path | None = None):
+    def __init__(self, folder: Path | None = None, collection: str = "companies"):
         self._folder = folder
+        self.collection = collection
 
     @property
     def folder(self) -> Path:
@@ -71,7 +74,8 @@ class LocalStore:
         return self._folder or Path(os.environ.get("VALORADOR_LOCAL_DIR", ROOT / ".local_companies"))
 
     def _path(self, owner: str) -> Path:
-        return self.folder / f"{owner_key(owner)}.json"
+        suffix = "" if self.collection == "companies" else f"_{self.collection}"  # compatibilidad con lo ya guardado
+        return self.folder / f"{owner_key(owner)}{suffix}.json"
 
     def _read(self, owner: str) -> dict[str, dict]:
         p = self._path(owner)
@@ -99,13 +103,14 @@ class LocalStore:
 
 
 class FirestoreStore:
-    def __init__(self, project: str | None = None):
+    def __init__(self, project: str | None = None, collection: str = "companies"):
         from google.cloud import firestore
 
         self.db = firestore.Client(project=project)
+        self.collection = collection
 
     def _col(self, owner: str):
-        return self.db.collection("users").document(owner_key(owner)).collection("companies")
+        return self.db.collection("users").document(owner_key(owner)).collection(self.collection)
 
     def list(self, owner: str) -> list[dict]:
         return sorted((d.to_dict() for d in self._col(owner).stream()), key=lambda c: c.get("name", "").lower())
@@ -127,8 +132,8 @@ def _backend() -> str:
     return os.environ.get("VALORADOR_STORE") or ("firestore" if os.environ.get("K_SERVICE") else "local")
 
 
-def get_store() -> CompanyStore:
+def get_store(collection: str = "companies") -> CompanyStore:
     """Firestore en Cloud Run (o si VALORADOR_STORE=firestore); si no, archivo local."""
     if _backend() == "firestore":
-        return FirestoreStore(os.environ.get("GOOGLE_CLOUD_PROJECT"))
-    return LocalStore()
+        return FirestoreStore(os.environ.get("GOOGLE_CLOUD_PROJECT"), collection)
+    return LocalStore(collection=collection)

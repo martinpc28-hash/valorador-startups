@@ -127,3 +127,41 @@ def project_cash_flows(
         nav = nav * (1 + growth) + call - dist
         rows.append({"Año": y, "Llamadas": call, "Distribuciones": dist, "NAV": nav})
     return pd.DataFrame(rows)
+
+
+# ----------------------------------------------------------------------- fondos precargados y guardados
+
+FLOW_COLS = ["date", "capital_call", "distribution", "nav"]
+EXAMPLES_SOURCE = ("CalPERS, Private Equity Program Fund Performance Review (31/03/2026): "
+                   "https://www.calpers.ca.gov/investments/about-investment-office/investment-organization/pep-fund-performance")
+
+
+def clean_flows(df: pd.DataFrame) -> pd.DataFrame:
+    """Columnas estándar, fechas como fecha e importes numéricos (vacío = sin dato)."""
+    missing = [c for c in FLOW_COLS if c not in df.columns]
+    if missing:
+        raise ValueError(f"Faltan columnas: {', '.join(missing)}")
+    out = df[FLOW_COLS].copy()
+    out["date"] = pd.to_datetime(out["date"])
+    for c in FLOW_COLS[1:]:
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+    return out.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+
+
+def flows_to_records(df: pd.DataFrame) -> list[dict]:
+    """Para guardar en la biblioteca (JSON / Firestore): fechas ISO y NaN como None."""
+    d = clean_flows(df)
+    d["date"] = d["date"].dt.strftime("%Y-%m-%d")
+    return [{k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in r.items()} for r in d.to_dict("records")]
+
+
+def records_to_flows(records: list[dict]) -> pd.DataFrame:
+    return clean_flows(pd.DataFrame(records, columns=FLOW_COLS))
+
+
+def load_examples(path=None) -> dict[str, pd.DataFrame]:
+    """Fondos reales de data/fund_examples.csv (ver scripts/build_fund_examples.py), en millones de USD."""
+    from src.paths import ROOT
+
+    df = pd.read_csv(path or ROOT / "data" / "fund_examples.csv")
+    return {name: clean_flows(g) for name, g in df.groupby("fund", sort=False)}

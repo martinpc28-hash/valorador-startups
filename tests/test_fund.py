@@ -50,3 +50,34 @@ def test_fund_metrics():
 def test_projection_calls_sum_to_commitment():
     p = project_cash_flows(100.0)
     assert p["Llamadas"].sum() == pytest.approx(100.0)
+
+
+# ----------------------------------------------------------------------- precargados y guardados
+
+def test_preloaded_funds_match_published_calpers_totals():
+    from src.fund import load_examples
+
+    ex = load_examples()
+    published = {  # millones de USD: (desembolsado, distribuido, valor residual, IRR neta)
+        "Insight Venture Partners IX (2015)": (105.669, 287.819, 131.463, 0.226),
+        "Lightspeed Venture Partners Select V (2022)": (96.5, 0.0, 179.153, 0.277),
+        "Insight Partners XII (2021)": (574.830, 0.663, 628.423, 0.026),
+    }
+    assert set(ex) == set(published)
+    for name, (paid, dist, nav, irr) in published.items():
+        m = fund_metrics(ex[name])
+        assert m.paid_in == pytest.approx(paid, abs=0.002) and m.distributed == pytest.approx(dist, abs=0.002)
+        assert m.nav == pytest.approx(nav, abs=0.002) and m.irr == pytest.approx(irr, abs=0.0006)
+
+
+def test_flows_round_trip_through_records_keeps_values_and_missing_nav():
+    from src.fund import clean_flows, flows_to_records, records_to_flows
+
+    flows = pd.DataFrame({"date": ["2021-12-31", "2020-12-31"], "capital_call": [5.0, 10.0],
+                          "distribution": [0.0, None], "nav": [12.0, None], "extra": [1, 2]})
+    recs = flows_to_records(flows)
+    assert recs[0] == {"date": "2020-12-31", "capital_call": 10.0, "distribution": None, "nav": None}  # ordenado, sin NaN
+    back = records_to_flows(recs)
+    pd.testing.assert_frame_equal(back, clean_flows(flows))
+    with pytest.raises(ValueError, match="nav"):
+        clean_flows(flows.drop(columns="nav"))

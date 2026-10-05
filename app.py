@@ -34,6 +34,7 @@ from src import company_store as cs
 from src import diagnostics as diag
 from src import memo as memo_mod
 from src import statements as stm
+from src import fund as fnd
 from src.fund import fund_metrics, j_curve, project_cash_flows
 from src.montecarlo import MCSettings, simulate
 from src.valuation import (
@@ -471,7 +472,8 @@ with T["Read Me"], st.container(key="readme"):
          "los campos. Revisa lo detectado y pulsa **💾 Guardar** al final de la pestaña. Una vez guardada, la empresa "
          "aparece arriba en la barra lateral, en **📁 Mis empresas**, donde eliges **Cargar en el modelo**."),
         ("Fondos", "Analiza un fondo de VC desde el punto de vista del inversor: DPI, RVPI, TVPI, MOIC e IRR, curva J "
-         "y una proyección simple de flujos. Compara el tamaño de tu fondo con los vehículos de VC que presentaron Form D."),
+         "y una proyección simple de flujos. Trae fondos reales precargados (datos publicados por CalPERS) y puedes "
+         "guardar en la biblioteca los flujos que cargues por CSV o edites.Compara el tamaño de tu fondo con los vehículos de VC que presentaron Form D."),
         ("Supuestos", "Tabla editable con los supuestos por etapa: IRR objetivo, probabilidad de supervivencia, "
          "dilución futura, prima de iliquidez y descuento por iliquidez. Son supuestos propios e ilustrativos."),
         ("Datos y fuentes", "Lista cada número de la industria que se está usando, con su fuente, fecha, URL y avisos "
@@ -1780,20 +1782,108 @@ EXAMPLE_FUND = pd.DataFrame({
     "nav": [18.0, 40.0, 62.0, 85.0, 95.0, 92.0, 80.0, 70.0],
 })
 
+@st.cache_resource(show_spinner=False)
+def fund_store():
+    return cs.get_store("funds")
+
+
+@st.cache_data(show_spinner=False)
+def fund_examples() -> dict[str, pd.DataFrame]:
+    return fnd.load_examples()
+
+
+def my_funds() -> list[dict]:
+    """Fondos guardados en la biblioteca compartida (misma lógica que las empresas)."""
+    if "fund_lib" not in st.session_state:
+        try:
+            st.session_state["fund_lib"] = fund_store().list(SHARED_OWNER)
+        except Exception as e:  # noqa: BLE001: se muestra al usuario en lugar de romper la app
+            st.session_state["fund_lib"] = []
+            st.session_state["fund_lib_error"] = str(e)
+    return st.session_state["fund_lib"]
+
+
+def save_fund(name: str, flows: pd.DataFrame, source: str, fund_id: str | None) -> None:
+    name = (name or "").strip()
+    if not name:
+        st.session_state["fund_msg"] = ("error", "Ponle un nombre al fondo antes de guardarlo.")
+        return
+    try:
+        doc = {"name": name, "source": source, "flows": fnd.flows_to_records(flows)}
+        same_name = next((f for f in my_funds() if f["name"].lower() == name.lower()), None)
+        if existing_id := fund_id or (same_name or {}).get("id"):
+            doc["id"] = existing_id  # mismo fondo o mismo nombre: se actualiza en lugar de duplicar
+        saved = fund_store().save(SHARED_OWNER, doc)
+    except Exception as e:  # noqa: BLE001
+        st.session_state["fund_msg"] = ("error", f"No se pudo guardar: {e}")
+        return
+    st.session_state.pop("fund_lib", None)
+    st.session_state["fund_sel"] = f"saved:{saved['id']}"
+    st.session_state["fund_msg"] = ("success", f"Guardado «{name}» en la biblioteca de fondos.")
+
+
+def delete_fund(fund_id: str, name: str) -> None:
+    try:
+        fund_store().delete(SHARED_OWNER, fund_id)
+    except Exception as e:  # noqa: BLE001
+        st.session_state["fund_msg"] = ("error", f"No se pudo borrar: {e}")
+        return
+    st.session_state.pop("fund_lib", None)
+    st.session_state["fund_sel"] = "ej"
+    st.session_state["fund_msg"] = ("success", f"Borrado «{name}».")
+
+
 with T["Fondos"]:
     st.caption("Análisis de un fondo de VC desde el punto de vista del inversor (LP). Importes en la moneda base, "
                "en las unidades que prefieras (p. ej. millones).")
-    up = st.file_uploader("Cargar flujos desde CSV (columnas: date, capital_call, distribution, nav)", type="csv", key="fund_csv")
-    base_flows = EXAMPLE_FUND
+
+    # Opciones: ejemplo ilustrativo, fondos reales precargados y fondos guardados por los usuarios
+    fund_opts: dict[str, tuple[str, pd.DataFrame, dict]] = {"ej": ("Ejemplo ilustrativo", EXAMPLE_FUND, {})}
+    for fname, fdf in fund_examples().items():
+        fund_opts[f"real:{fname}"] = (f"Real (CalPERS): {fname}", fdf, {"real": True})
+    for f in my_funds():
+        try:
+            fund_opts[f"saved:{f['id']}"] = (f"Guardado: {f['name']}", fnd.records_to_flows(f.get("flows") or []), f)
+        except ValueError:
+            continue
+    if st.session_state.get("fund_sel") not in fund_opts:
+        st.session_state["fund_sel"] = "ej"
+
+    fc1, fc2 = st.columns([3, 2])
+    sel = fc1.selectbox("Fondo", list(fund_opts), format_func=lambda k: fund_opts[k][0], key="fund_sel",
+                        help="Fondos reales precargados, el ejemplo ilustrativo o los que hayas guardado.")
+    up = fc2.file_uploader("O carga tus flujos desde CSV (columnas: date, capital_call, distribution, nav)",
+                           type="csv", key="fund_csv")
+    if err := st.session_state.get("fund_lib_error"):
+        st.warning(f"No se pudo leer la biblioteca de fondos: {err}")
+    if msg := st.session_state.pop("fund_msg", None):
+        getattr(st, msg[0])(msg[1])
+
+    label, base_flows, meta = fund_opts[sel]
+    editor_id = f"{sel}_{meta.get('updated_at', '')}"
+    save_source, save_id, save_name = f"copia de {label}", None, ""
     if up is not None:
         try:
-            base_flows = pd.read_csv(up, parse_dates=["date"])[["date", "capital_call", "distribution", "nav"]]
+            base_flows = fnd.clean_flows(pd.read_csv(up))
+            editor_id, save_source, save_name = f"csv_{up.name}_{up.size}", f"CSV: {up.name}", up.name.rsplit(".", 1)[0]
+            st.info(f"Usando el CSV **{up.name}**. Guárdalo abajo para tenerlo disponible la próxima vez.")
         except Exception as e:  # noqa: BLE001: el usuario debe ver por qué no se pudo leer
             st.error(f"No se pudo leer el CSV: {e}")
+    elif sel == "ej":
+        st.info("Datos de **ejemplo ilustrativo**. Elige un fondo real, edita la tabla o carga tu CSV.")
+    elif meta.get("real"):
+        st.info("Fondo **real**, importes en **millones de USD**. Los totales (capital desembolsado, distribuido, valor "
+                "residual) e IRR neta son los publicados por CalPERS a 31/03/2026. CalPERS no publica la fecha de cada "
+                "flujo: el reparto año a año está reconstruido para que la IRR coincida con la publicada, así que la "
+                "forma de la curva J es orientativa.")
+        st.caption(f"Fuente: {fnd.EXAMPLES_SOURCE}")
     else:
-        st.info("Datos de **ejemplo ilustrativo**. Edita la tabla o carga tu CSV.")
+        save_source, save_id, save_name = meta.get("source", ""), meta["id"], meta["name"]
+        st.caption(f"Guardado en la biblioteca · origen: {meta.get('source') or 'n/d'} · "
+                   f"última modificación: {meta.get('updated_at', 'n/d')}")
+
     flows = st.data_editor(
-        base_flows, num_rows="dynamic", hide_index=True, width="stretch", key=f"fund_editor_{up.name if up else 'ej'}",
+        base_flows, num_rows="dynamic", hide_index=True, width="stretch", key=f"fund_editor_{editor_id}",
         column_config={
             "date": st.column_config.DateColumn("Fecha", required=True),
             "capital_call": st.column_config.NumberColumn("Capital llamado", min_value=0.0),
@@ -1801,6 +1891,18 @@ with T["Fondos"]:
             "nav": st.column_config.NumberColumn("Valor residual (NAV)", min_value=0.0),
         },
     ).dropna(subset=["date"])
+
+    with st.container(border=True):
+        st.markdown("**💾 Guardar estos flujos en la biblioteca de fondos**")
+        g1, g2, g3 = st.columns([3, 1, 1], vertical_alignment="bottom")
+        fund_name = g1.text_input("Nombre del fondo", save_name, key=f"fund_name_{editor_id}",
+                                  placeholder="p. ej. Mi fondo I (2021)")
+        g2.button("Guardar", key="fund_save", type="primary", width="stretch", on_click=save_fund,
+                  args=(fund_name, flows, save_source, save_id), disabled=flows.empty)
+        if save_id:
+            g3.button("Borrar", key="fund_delete", width="stretch", on_click=delete_fund, args=(save_id, save_name))
+        st.caption("Guarda lo que hayas cargado por CSV o editado en la tabla. Si ya existe un fondo con ese nombre, "
+                   "se actualiza. La biblioteca es compartida y pública: no guardes datos confidenciales.")
 
     if len(flows) >= 2 and flows["capital_call"].fillna(0).sum() > 0:
         fm = fund_metrics(flows)

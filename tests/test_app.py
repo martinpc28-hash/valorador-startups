@@ -163,3 +163,35 @@ def test_every_metric_tooltip_shows_its_formula():
 
 def test_vc_survival_mode_and_ebitda_exit():
     run(**{"Tratamiento del riesgo de fracaso": "Costo del equity × supervivencia", "Múltiplo de salida": "EV/EBITDA", "Beta": "De mercado"})
+
+
+def test_fund_presets_and_save_to_library(tmp_path, monkeypatch):
+    monkeypatch.setenv("VALORADOR_STORE", "local")
+    monkeypatch.setenv("VALORADOR_LOCAL_DIR", str(tmp_path))
+    import src.company_store as store_mod
+
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.run()
+    sel = at.selectbox(key="fund_sel")
+    real = "real:Insight Venture Partners IX (2015)"
+    assert "Real (CalPERS): Insight Venture Partners IX (2015)" in sel.options
+    sel.set_value(real)
+    at.run()
+    assert metric_value(at, "TVPI") == "3,97x" and metric_value(at, "IRR (XIRR)").startswith("22,6")
+
+    # Guardar una copia con otro nombre y volver a encontrarla en el selector
+    next(t for t in at.text_input if t.label == "Nombre del fondo").input("Mi copia de Insight")
+    at.run()
+    at.button(key="fund_save").click()
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    saved = store_mod.LocalStore(tmp_path, collection="funds").list("compartida")
+    assert [f["name"] for f in saved] == ["Mi copia de Insight"] and len(saved[0]["flows"]) == 12
+    assert at.session_state["fund_sel"] == f"saved:{saved[0]['id']}"
+    assert metric_value(at, "TVPI") == "3,97x"
+    assert store_mod.LocalStore(tmp_path).list("compartida") == []  # no se mezcla con las empresas
+
+    at.button(key="fund_delete").click()
+    at.run()
+    assert store_mod.LocalStore(tmp_path, collection="funds").list("compartida") == []
+    assert at.session_state["fund_sel"] == "ej" and not at.exception
