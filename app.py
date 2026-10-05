@@ -31,6 +31,7 @@ from src.data import (
 )
 from src import comparables as cmp
 from src import company_store as cs
+from src import diagnostics as diag
 from src import memo as memo_mod
 from src import statements as stm
 from src.fund import fund_metrics, j_curve, project_cash_flows
@@ -317,7 +318,8 @@ with st.sidebar:
         exit_basis = st.radio("Múltiplo de salida", ["EV/Sales", "EV/EBITDA"], horizontal=True)
 
     with st.expander("Tasas, primas y beta"):
-        beta_type = st.radio("Beta", ["Total", "De mercado"], horizontal=True,
+        _default("beta_type", "Total")
+        beta_type = st.radio("Beta", ["Total", "De mercado"], horizontal=True, key="beta_type",
                              help="Beta total = beta de mercado / correlación. Supone un inversor no diversificado (fundador, VC concentrado).")
         rf_default = (us_rf["value"] if currency == "USD" else ea_rf["value"])
         rf = pct_input("Tasa libre de riesgo (%)", rf_default, f"rf_{currency}", 0.0, 20.0, 0.05,
@@ -623,12 +625,21 @@ with st.sidebar, st.expander("Supuestos anclados en la industria"):
         st.session_state[tm_key] = round(st.session_state.pop("tm_override") * 100, 2)
     target_margin = pct_input("Margen operativo objetivo (%)", R["operating_margin"].value, tm_key,
                               -100.0, 90.0, help="Por defecto, margen operativo de la industria.\n\n" + R["operating_margin"].provenance())
-    margin_year = st.slider("Año en que se alcanza el margen objetivo", 2, 10, 7)
-    s2c = st.number_input("Ventas / capital invertido", 0.05, 20.0, float(round(R["sales_to_capital"].value, 2)), 0.05,
-                          key=f"s2c_{industry}_{apply_caps}", help=R["sales_to_capital"].provenance())
+    _default("margin_year", 7)
+    margin_year = st.slider("Año en que se alcanza el margen objetivo", 2, 10, key="margin_year")
+    # Los botones "Aplicar" del diagnóstico dejan un *_override que se vuelca aquí antes de dibujar cada widget
+    s2c_key = f"s2c_{industry}_{apply_caps}"
+    if "s2c_override" in st.session_state:
+        st.session_state[s2c_key] = round(float(st.session_state.pop("s2c_override")), 2)
+    _default(s2c_key, float(round(R["sales_to_capital"].value, 2)))
+    s2c = st.number_input("Ventas / capital invertido", 0.05, 20.0, step=0.05, key=s2c_key, help=R["sales_to_capital"].provenance())
     mult_res = R["ev_sales"] if exit_basis == "EV/Sales" else R["ev_ebitda_pos"]
-    exit_multiple = st.number_input(f"Múltiplo de salida {exit_basis}", 0.1, 200.0, float(round(mult_res.value, 2)), 0.1,
-                                    key=f"mult_{industry}_{exit_basis}_{apply_caps}",
+    mult_key = f"mult_{industry}_{exit_basis}_{apply_caps}"
+    if "mult_override" in st.session_state:
+        st.session_state[mult_key] = round(float(st.session_state.pop("mult_override")), 2)
+    _default(mult_key, float(round(mult_res.value, 2)))
+    exit_multiple = st.number_input(f"Múltiplo de salida {exit_basis}", 0.1, 200.0, step=0.1,
+                                    key=mult_key,
                                     help="Por defecto, múltiplo de la industria" + (" (solo empresas con EBITDA positivo)" if exit_basis == "EV/EBITDA" else "")
                                     + ".\n\n" + mult_res.provenance())
     stable_growth = pct_input("Crecimiento estable perpetuo (%)", min(0.03, rf), "g_stable", -5.0, 10.0, 0.25,
@@ -787,6 +798,97 @@ def metric(col, label: str, value: str, res=None, help: str | None = None, delta
         col.caption(delta)
 
 
+# ======================================================================= Diagnóstico de resultados extremos
+
+
+def evaluate_changes(ch: dict) -> dict:
+    """Recalcula el modelo completo (DCF, método VC y MOIC) con los cambios de una alternativa."""
+    from dataclasses import replace as _replace
+
+    dr_ = discount_rate(R["unlevered_beta_cash_adj"].value, R["correlation_market"].value, ch.get("use_total_beta", use_total),
+                        rf, erp, size_prem, illiq_prem, de_ratio, tax, kd)
+    inp = _replace(base, cost_of_capital=dr_.cost_of_capital,
+                   target_margin=ch.get("target_margin", base.target_margin),
+                   sales_to_capital=ch.get("sales_to_capital", base.sales_to_capital),
+                   margin_year=int(ch.get("margin_year", base.margin_year)),
+                   growth_high=ch.get("growth", base.growth_high),
+                   stable_growth=ch.get("stable_growth", base.stable_growth))
+    r_ = dcf(inp)
+    v_, _, _ = vc_for(r_.projection, ch.get("exit_multiple", exit_multiple))
+    d_ = deal_returns(v_.exit_value, exit_year, terms, float(stage["future_dilution"]), float(stage["survival_prob"]))
+    return {"dcf": r_.equity_value, "vc_pre": v_.pre_money, "moic": d_.moic}
+
+
+def apply_alternative(ch: dict, label: str) -> None:
+    """Callback de «Aplicar»: lleva el cambio a la barra lateral (se vuelca antes de dibujar cada widget)."""
+    ss = st.session_state
+    if "target_margin" in ch:
+        ss["tm_override"] = float(ch["target_margin"])
+    if "sales_to_capital" in ch:
+        ss["s2c_override"] = float(ch["sales_to_capital"])
+    if "exit_multiple" in ch:
+        ss["mult_override"] = float(ch["exit_multiple"])
+    if "use_total_beta" in ch:
+        ss["beta_type"] = "Total" if ch["use_total_beta"] else "De mercado"
+    if "margin_year" in ch:
+        ss["margin_year"] = int(ch["margin_year"])
+    if "growth" in ch:
+        ss["growth"] = round(float(ch["growth"]) * 100, 2)
+    if "stable_growth" in ch:
+        ss["g_stable"] = round(float(ch["stable_growth"]) * 100, 2)
+    ss["diag_msg"] = f"Aplicado: {label}. Revisa el resultado y, si lo mantienes, explícalo en el memo."
+
+
+diag_state = diag.DiagState(
+    currency=currency, industry=industry, revenue=revenue0, growth=growth, current_margin=current_margin,
+    target_margin=target_margin, industry_margin=R["operating_margin"].value, margin_year=margin_year, sales_to_capital=s2c,
+    use_total_beta=use_total, beta_unlevered=R["unlevered_beta_cash_adj"].value, correlation=R["correlation_market"].value,
+    beta_used=dr.beta_used, risk_free=rf, erp=erp, extra_premia=size_prem + illiq_prem, cost_of_capital=dr.cost_of_capital,
+    stable_growth=dcf_res.stable_growth_used, dcf_equity=dcf_res.equity_value, dcf_operating=dcf_res.operating_value,
+    dcf_raw_equity=dcf_res.survival_adjusted_value + cash - debt, pv_terminal=dcf_res.pv_terminal,
+    capital_need=dcf_res.capital_need, investment=terms.investment, pre_money=terms.pre_money, exit_year=exit_year,
+    exit_basis=exit_basis, exit_multiple=exit_multiple, small_cap_multiple=float(size_val("Bottom decile", "ev_sales")),
+    exit_revenue=rev_exit, exit_value=vc_res.exit_value, vc_pre_money=vc_res.pre_money, vc_rate=vc_res.discount_rate,
+    future_dilution=float(stage["future_dilution"]), stake=terms.stake, moic=deal.moic,
+    method_mids={r["method"]: r["mid"] for r in ff_rows},
+)
+diag_notes = diag.diagnose(diag_state, evaluate_changes)
+DIAG_NOW = {"dcf": dcf_res.equity_value, "vc_pre": vc_res.pre_money, "moic": deal.moic}
+
+
+def render_notes(notes: list, where: str, intro: bool = True) -> None:
+    """Capas 2 y 3: explicación con números y alternativas recalculadas, con botón para aplicarlas."""
+    if st.session_state.get("diag_msg"):
+        msg = st.session_state.pop("diag_msg")
+        st.success(msg, icon=":material/tune:")
+        st.toast(msg, icon="✅")
+    fm = lambda k, v: fmt_mult(v) if k == "moic" else fmt_money(v, currency)  # noqa: E731
+    for n in notes:
+        with st.container(border=True):
+            st.markdown(f"{diag.SEVERITY_ICON[n.severity]} **{n.title}**")
+            st.markdown(n.explanation)
+            st.markdown("\n".join(f"- {d}" for d in n.drivers))
+            if n.alternatives:
+                st.markdown("**Qué cambiaría el resultado** (recalculado con el modelo completo):")
+                h = st.columns([4, 1.4, 1.4, 1, 1.2])
+                for col, txt in zip(h, ["Alternativa", "DCF", "Método VC", "MOIC", ""]):
+                    col.caption(txt)
+                cur = st.columns([4, 1.4, 1.4, 1, 1.2])
+                cur[0].markdown(":gray[Actual]")
+                for col, k in zip(cur[1:4], ["dcf", "vc_pre", "moic"]):
+                    col.markdown(f":gray[{fm(k, DIAG_NOW[k])}]")
+                for i, a in enumerate(n.alternatives):
+                    row = st.columns([4, 1.4, 1.4, 1, 1.2])
+                    row[0].markdown(f"{a.label}  \n:gray[{a.why}]")
+                    for col, k in zip(row[1:4], ["dcf", "vc_pre", "moic"]):
+                        v = a.outcome.get(k, math.nan)
+                        txt = fm(k, v) if not (isinstance(v, float) and math.isnan(v)) else "n/d"
+                        col.markdown(f"**{txt}**" if k == n.focus else txt)
+                    row[4].button("Aplicar", key=f"diag_{where}_{n.id}_{i}", on_click=apply_alternative,
+                                  args=(a.changes, a.label), width="stretch",
+                                  help="Lleva este cambio a la barra lateral. Puedes deshacerlo editando el valor allí.")
+
+
 # ======================================================================= Resumen
 
 with T["Resumen"]:
@@ -817,6 +919,14 @@ with T["Resumen"]:
            formula=f"runway = caja / burn rate mensual = {fmt_money(cash, currency)} / {fmt_money(burn, currency)}",
            help="Sin contar el dinero de la ronda.")
 
+    st.markdown("#### Por qué estos números")
+    if diag_notes:
+        st.caption(f"{len(diag_notes)} resultado(s) que conviene explicar antes de defender la valoración, de más a menos "
+                   "importante. Cada alternativa está recalculada con el modelo completo.")
+        render_notes(diag_notes, "res")
+    else:
+        st.caption("No hay resultados extremos ni contradicciones entre métodos que explicar con estos supuestos.")
+
     st.plotly_chart(ch.football_field(ff_rows, terms.pre_money, currency), width="stretch")
     st.dataframe(pd.DataFrame([{
         "Método": r["method"], "Bajo": fmt_money(r["low"], currency), "Central": fmt_money(r["mid"], currency),
@@ -834,6 +944,10 @@ with T["Resumen"]:
 # ======================================================================= DCF
 
 with T["DCF"]:
+    _tab_notes = [n for n in diag_notes if "DCF" in n.tabs]
+    if _tab_notes:
+        with st.expander(f"⚠️ Notas sobre este resultado ({len(_tab_notes)})", expanded=False):
+            render_notes(_tab_notes, "dcf")
     st.subheader("Costo de capital")
     c = st.columns(5)
     metric(c[0], "Beta desapalancada (industria)", fmt_num(R["unlevered_beta_cash_adj"].value, 2), R["unlevered_beta_cash_adj"],
@@ -921,6 +1035,10 @@ with T["DCF"]:
 # ======================================================================= Método VC
 
 with T["Método VC"]:
+    _tab_notes = [n for n in diag_notes if "Método VC" in n.tabs]
+    if _tab_notes:
+        with st.expander(f"⚠️ Notas sobre este resultado ({len(_tab_notes)})", expanded=False):
+            render_notes(_tab_notes, "vc")
     c = st.columns(4)
     metric(c[0], f"Ingresos año {exit_year}", fmt_money(rev_exit, currency),
            formula=f"ingresos actuales × Π (1 + g_t), años 1 a {exit_year}; g se mantiene {hg_years} años y luego baja hasta la tasa estable")
@@ -1053,6 +1171,10 @@ with T["Monte Carlo"]:
 # ======================================================================= Caja y ronda
 
 with T["Caja y ronda"]:
+    _tab_notes = [n for n in diag_notes if "Caja y ronda" in n.tabs]
+    if _tab_notes:
+        with st.expander(f"⚠️ Notas sobre este resultado ({len(_tab_notes)})", expanded=False):
+            render_notes(_tab_notes, "caja")
     c = st.columns(4)
     metric(c[0], "Runway actual", f"{fmt_num(runway, 1)} meses",
            formula=f"caja / burn rate mensual = {fmt_money(cash, currency)} / {fmt_money(burn, currency)}")
@@ -1863,6 +1985,7 @@ def build_memo_context() -> memo_mod.MemoContext:
         capital_need=dcf_res.capital_need, funding_gap=funding_gap, implied_dilution=dil_implied,
         spain=spain, spain_label=spain_label, comparables=comps,
         assumptions=assumptions, provenance=provenance, data_warnings=list(dict.fromkeys(warnings)),
+        result_notes=[n.as_text(currency) for n in diag_notes],
     )
     return ctx
 

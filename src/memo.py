@@ -125,6 +125,8 @@ class MemoContext:
     spain: pd.DataFrame | None = None
     spain_label: str = ""
     comparables: pd.DataFrame | None = None
+    # Notas del diagnóstico de resultados extremos (title, explanation, drivers, alternatives)
+    result_notes: list[dict] = field(default_factory=list)
     # Anexo
     assumptions: pd.DataFrame | None = None
     provenance: pd.DataFrame | None = None
@@ -334,7 +336,22 @@ def build_memo(c: MemoContext) -> Memo:
             s.blocks.append(_df_table(c.comparables))
         sections.append(s)
 
-    # 7. Riesgos y 8. Próximos pasos
+    # Notas sobre los resultados: responde de antemano a "¿por qué este número?"
+    if c.result_notes:
+        s = Section(f"{len(sections) + 1}. Notas sobre los resultados")
+        s.blocks.append("Resultados extremos o contradictorios detectados en el análisis, con sus causas y el efecto de "
+                        "supuestos alternativos (recalculados con el modelo completo).")
+        for note in c.result_notes:
+            s.blocks.append(Sub(note["title"]))
+            s.blocks.append(note["explanation"])
+            if note.get("drivers"):
+                s.blocks.append(list(note["drivers"]))
+            if note.get("alternatives"):
+                s.blocks.append("Qué cambiaría el resultado:")
+                s.blocks.append(list(note["alternatives"]))
+        sections.append(s)
+
+    # Riesgos y próximos pasos
     n = len(sections) + 1
     sections.append(Section(f"{n}. Riesgos y mitigantes", [list(c.risks) or ["Sin riesgos indicados."]]))
     sections.append(Section(f"{n + 1}. Próximos pasos", [list(c.next_steps) or ["Sin próximos pasos indicados."]]))
