@@ -5,6 +5,7 @@ Ejecutar:  streamlit run app.py
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 
 import numpy as np
@@ -30,6 +31,7 @@ from src.data import (
 )
 from src import comparables as cmp
 from src import company_store as cs
+from src import memo as memo_mod
 from src import statements as stm
 from src.fund import fund_metrics, j_curve, project_cash_flows
 from src.montecarlo import MCSettings, simulate
@@ -196,6 +198,17 @@ def load_company(company: dict) -> None:
         st.session_state["industry"] = company["industry"]
     if company.get("stage") in set(stages["stage_label"]):
         st.session_state["stage"] = company["stage"]
+    # Borrador del memo guardado con la empresa (o se limpia el de la empresa anterior)
+    draft = company.get("memo") or {}
+    for field, key in {"analyst": "memo_analyst", "fund": "memo_fund", "recommendation": "memo_reco",
+                       "thesis": "memo_thesis", "description": "memo_desc", "use_of_funds": "memo_use",
+                       "risks": "memo_risks", "next_steps": "memo_next"}.items():
+        if draft.get(field) is not None:
+            st.session_state[key] = draft[field]
+        else:
+            st.session_state.pop(key, None)  # vuelve a su valor por defecto (riesgos detectados, notas…)
+    st.session_state["memo_comps"] = draft.get("comparables") or []
+    st.session_state.pop("memo_files", None)
     if company.get("id"):
         st.session_state["active_company"] = company["id"]
         st.session_state["lib_pick"] = company["id"]
@@ -354,6 +367,7 @@ warn_box = st.container()
 TAB_GROUPS = [
     ("📖 Read Me", ["Read Me"]),
     ("🎯 Resumen", ["Resumen"]),
+    ("📝 Memo", ["Memo"]),
     ("📈 Valoración", ["DCF", "Método VC", "Múltiplos"]),
     ("🎲 Riesgo y caja", ["Escenarios", "Monte Carlo", "Caja y ronda"]),
     ("🔎 Comparables", ["Comparables", "Ratios España"]),
@@ -418,6 +432,11 @@ with T["Read Me"], st.container(key="readme"):
     tabs_doc = [
         ("Resumen", "Muestra el rango de valor de cada método (DCF, método VC, múltiplos y Monte Carlo) frente a la "
          "pre-money propuesta, y dice si la propuesta queda por debajo, dentro o por encima de ese rango."),
+        ("Memo", "Prepara el memo de inversión para el comité. La app rellena todas las cifras, tablas y gráficos con el "
+         "análisis actual y propone los riesgos que detecta (runway corto, déficit de financiación, precio fuera de rango, "
+         "múltiplos agresivos…). Tú añades la recomendación, la tesis, la descripción, el uso de fondos y los próximos pasos. "
+         "Se descarga en PDF para circularlo, en Word para editarlo y en Excel para rehacer los números, con un anexo de "
+         "supuestos, fórmulas y fuentes. El borrador se puede guardar con la empresa activa."),
         ("DCF", "Descuenta los flujos de caja futuros. Toma la beta de la industria, la ajusta a la deuda de la "
          "startup y calcula el costo de capital. Proyecta 10 años: los ingresos crecen y convergen a una tasa estable, "
          "el margen converge al de la industria y la reinversión sale del ratio ventas / capital. Tiene en cuenta las "
@@ -1718,6 +1737,244 @@ with T["Fondos"]:
                                      f"Tamaño ({sym}, escala logarítmica)", {"Tu fondo": fund_size}), width="stretch")
     st.caption("Incluye fondos y vehículos de una sola inversión (SPVs), por eso la mediana es baja. Es contexto de tamaño, "
                "no un benchmark de rentabilidad: no hay todavía una fuente verificada y redistribuible de retornos de fondos.")
+
+# ======================================================================= Memo de inversión
+
+MEMO_KEYS = {"analyst": "memo_analyst", "fund": "memo_fund", "recommendation": "memo_reco", "thesis": "memo_thesis",
+             "description": "memo_desc", "use_of_funds": "memo_use", "risks": "memo_risks", "next_steps": "memo_next"}
+
+
+def _lines(text: str) -> list[str]:
+    return [ln.strip(" -•*\t") for ln in (text or "").splitlines() if ln.strip(" -•*\t")]
+
+
+def build_memo_context() -> memo_mod.MemoContext:
+    """Reúne lo que ya calculó la app (mismas cifras que las pestañas) y lo que escribió el analista."""
+    ss = st.session_state
+    sym_ = sym
+    fmt_m = lambda v: fmt_money(v, currency)  # noqa: E731
+    lib_by_id = {c["id"]: c for c in my_companies()}
+    active = lib_by_id.get(ss.get("active_company"))
+
+    # Supuestos (anexo)
+    tm_origin = "empresa guardada" if active and (active.get("inputs") or {}).get("target_margin") is not None else (
+        "industria" if abs(target_margin - R["operating_margin"].value) < 1e-9 else "usuario")
+    assumptions = pd.DataFrame([
+        ("Industria", industry, "barra lateral"), ("Etapa", stage_label, "barra lateral"), ("Moneda", currency, "barra lateral"),
+        ("Ingresos últimos 12 meses", fmt_m(revenue0), "usuario"), ("Crecimiento anual", fmt_pct(growth), "usuario"),
+        ("Años de alto crecimiento", str(hg_years), "usuario"), ("Margen operativo actual", fmt_pct(current_margin), "usuario"),
+        ("Margen operativo objetivo", fmt_pct(target_margin), tm_origin), ("Año del margen objetivo", str(margin_year), "usuario"),
+        ("Ventas / capital invertido", fmt_num(s2c, 2), "industria (editable)"),
+        ("Tasa libre de riesgo", fmt_pct(rf, 2), "Damodaran (EE. UU.)" if currency == "USD" else "BCE (curva AAA euro)"),
+        ("Prima de riesgo del mercado", fmt_pct(erp, 2), "Damodaran"), ("Prima por tamaño", fmt_pct(size_prem), "usuario"),
+        ("Prima por iliquidez", fmt_pct(illiq_prem), "supuesto de etapa"), ("Beta", f"{beta_type} ({fmt_num(dr.beta_used, 2)})", "industria"),
+        ("D/E de la startup", fmt_pct(de_ratio), "usuario"), ("Tasa marginal de impuestos", fmt_pct(tax), "usuario"),
+        ("Crecimiento estable", fmt_pct(stable_growth), "usuario (limitado a la tasa libre de riesgo)"),
+        ("Probabilidad de supervivencia", fmt_pct(stage["survival_prob"], 0), "supuesto de etapa (ilustrativo)"),
+        ("IRR objetivo", fmt_pct(stage["target_irr"], 0), "supuesto de etapa (ilustrativo)"),
+        ("Dilución futura", fmt_pct(stage["future_dilution"], 0), "supuesto de etapa (ilustrativo)"),
+        ("Descuento por iliquidez (múltiplos)", fmt_pct(illiq_disc, 0), "supuesto de etapa (ilustrativo)"),
+        ("Año de salida", str(exit_year), "usuario"), ("Múltiplo de salida", f"{exit_basis} {fmt_mult(exit_multiple)}", "industria (editable)"),
+        ("Tratamiento del fracaso (método VC)", vc_mode_label, "usuario"),
+    ], columns=["Supuesto", "Valor", "Origen"])
+
+    provenance = pd.DataFrame([{
+        "Dato": r.label, "Valor": (fmt_pct(r.value) if r.unit == "decimal" else fmt_num(r.value, 2)), "Fuente": r.source,
+        "Industria usada": r.industry_used, "Fecha": r.as_of,
+    } for r in resolver.used.values() if not r.missing])
+
+    mult = pd.DataFrame({
+        "Método": mult_df["Método"], "Múltiplo": mult_df["Múltiplo"].map(fmt_mult),
+        "Valor del equity": mult_df["Valor del equity"].map(lambda v: fmt_m(v) if not math.isnan(v) else "no aplica"),
+        # "damodaran · Software (...) · 2026-01-09" -> "damodaran (2026-01-09)": cabe en una línea del PDF
+        "Fuente": mult_df["Fuente"].map(lambda f: f"{f.split(' · ')[0]} ({f.split(' · ')[-1]})" if " · " in f else f),
+    })
+    scen = pd.DataFrame({
+        "Escenario": sc_res["Escenario"], "DCF": sc_res["DCF"].map(fmt_m), "Método VC": sc_res["Método VC (pre-money)"].map(fmt_m),
+        "Múltiplos": sc_res["Múltiplos (EV/Sales)"].map(fmt_m), "Crecimiento": sc_res["Crecimiento"].map(fmt_pct),
+        "Margen objetivo": sc_res["Margen objetivo"].map(fmt_pct),
+    })
+
+    # Sector en España (Banco de España): sector de la industria y tramo de tus ingresos con dato publicado
+    spain, spain_label = None, ""
+    det_ = load_bde_detail()
+    code = D["crosswalk"][D["crosswalk"]["source"] == "bde"].set_index("industry_std")["industry_original"].to_dict().get(industry)
+    if code and not det_.empty:
+        rev_eur_ = revenue0 * usd_rate(currency) / usd_rate("EUR")
+        avail = det_[(det_["sector_code"] == code) & det_["p50"].notna()]
+        size_ = size_for_revenue(rev_eur_)
+        size_ = size_ if size_ in set(avail["size_id"]) else "0"
+        cut_ = avail[(avail["size_id"] == size_)].drop_duplicates(["metric", "year"])
+        if not cut_.empty:
+            yr = int(cut_["year"].max())
+            now_ = cut_[cut_["year"] == yr].set_index("metric")
+            mine_ = {"revenue_growth_1y": growth, "ebitda_margin": current_margin + da_margin}
+            rows = []
+            for mtr, lab in BDE_LABELS.items():
+                if mtr in now_.index:
+                    r_ = now_.loc[mtr]
+                    rows.append([lab, fmt_ratio(r_["p25"], r_["unit"]), fmt_ratio(r_["p50"], r_["unit"]), fmt_ratio(r_["p75"], r_["unit"]),
+                                 fmt_ratio(mine_.get(mtr, math.nan), r_["unit"]),
+                                 position(mine_.get(mtr, math.nan), r_["p25"], r_["p50"], r_["p75"])])
+            spain = pd.DataFrame(rows, columns=["Ratio", "P25", "Mediana", "P75", "Tu empresa", "Posición"])
+            spain_label = f"{code} {cut_['sector_name'].iloc[0]}, {cut_['size_name'].iloc[0].lower()}, ejercicio {yr}"
+
+    comps = None
+    picked_ids = ss.get("memo_comps") or []
+    if picked_ids:
+        rows = []
+        for cid in picked_ids:
+            co = lib_by_id.get(cid)
+            if not co:
+                continue
+            inp = co.get("inputs") or {}
+            k = usd_rate(co.get("currency") or "USD") / usd_rate(currency)
+            mv = lambda f: fmt_m(inp[f] * k) if inp.get(f) is not None else "n/d"  # noqa: E731
+            pv = lambda f: fmt_pct(inp[f]) if inp.get(f) is not None else "n/d"  # noqa: E731
+            rows.append([co["name"], co.get("industry") or "n/d", mv("revenue"), pv("growth"), pv("current_margin"), mv("investment"), mv("pre_money")])
+        comps = pd.DataFrame(rows, columns=["Empresa", "Industria", "Ingresos", "Crecimiento", "Margen operativo", "Ronda", "Pre-money"])
+
+    top = tor.assign(span=(tor["high"] - tor["low"]).abs()).sort_values("span").iloc[-1]["variable"] if not tor.empty else ""
+    pm_ = mc_res.percentiles.get("MOIC si hay salida", mc_res.percentiles["MOIC"])
+    ctx = memo_mod.MemoContext(
+        company=(active["name"] if active else ss.get("memo_company") or "Startup analizada"),
+        analyst=ss.get("memo_analyst", ""), fund=ss.get("memo_fund", ""), recommendation=ss.get("memo_reco", "Seguir analizando"),
+        thesis=ss.get("memo_thesis", ""), description=ss.get("memo_desc", ""), use_of_funds=ss.get("memo_use", ""),
+        risks=_lines(ss.get("memo_risks", "")), next_steps=_lines(ss.get("memo_next", "")),
+        currency=currency, industry=industry, sector=sector_of[industry], stage=stage_label,
+        revenue=revenue0, growth=growth, current_margin=current_margin, target_margin=target_margin, margin_year=margin_year,
+        burn=burn, cash=cash, debt=debt, runway=runway,
+        investment=terms.investment, pre_money=terms.pre_money, post_money=terms.post_money, stake=terms.stake,
+        future_dilution=float(stage["future_dilution"]), survival_prob=float(stage["survival_prob"]), target_irr=float(stage["target_irr"]),
+        verdict_title=verdict[0], lo_mid=lo_mid, hi_mid=hi_mid, ff_rows=ff_rows,
+        dcf_equity=dcf_res.equity_value, dcf_operating=dcf_res.operating_value, dcf_pv_fcff=dcf_res.pv_fcff,
+        dcf_pv_terminal=dcf_res.pv_terminal, cost_of_equity=dr.cost_of_equity, cost_of_capital=dr.cost_of_capital,
+        mature_coc=mature_coc, beta_used=dr.beta_used, beta_type=dr.beta_type, stable_growth=dcf_res.stable_growth_used,
+        projection=proj, top_sensitivity=top,
+        exit_year=exit_year, exit_basis=exit_basis, exit_multiple=exit_multiple,
+        small_cap_multiple=float(size_val("Bottom decile", "ev_sales")), exit_value=vc_res.exit_value, vc_rate=vc_res.discount_rate,
+        vc_mode=("IRR objetivo de la etapa" if vc_mode == "irr" else "coste del equity por supervivencia"),
+        vc_pre_money=vc_res.pre_money, vc_post_money=vc_res.post_money, required_stake=vc_res.required_stake,
+        moic=deal.moic, irr=deal.irr, expected_moic=deal.expected_moic, stake_exit=deal.stake_exit, proceeds=deal.proceeds,
+        multiples=mult, illiquidity_discount=illiq_disc, scenarios=scen,
+        mc_prob_fail=float(1 - mc_res.survived.mean()), mc_prob_target=mc_res.prob_moic_target, mc_prob_loss=mc_res.prob_loss,
+        mc_moic_mean=mc_res.percentiles["MOIC"]["Media"], mc_moic_pct=pm_, mc_target=mc.moic_target,
+        mc_moic=mc_res.moic, mc_survived=mc_res.survived, mc_sims=mc.n_sims,
+        capital_need=dcf_res.capital_need, funding_gap=funding_gap, implied_dilution=dil_implied,
+        spain=spain, spain_label=spain_label, comparables=comps,
+        assumptions=assumptions, provenance=provenance, data_warnings=list(dict.fromkeys(warnings)),
+    )
+    return ctx
+
+
+def memo_refresh_risks(ctx_risks: list[str]) -> None:
+    st.session_state["memo_risks"] = "\n".join(ctx_risks)
+
+
+def memo_save_draft() -> None:
+    active_id = st.session_state.get("active_company")
+    co = next((c for c in my_companies() if c["id"] == active_id), None)
+    if not co:
+        st.session_state["memo_msg_err"] = "Carga primero una empresa guardada para guardar el borrador en ella."
+        return
+    co = dict(co)
+    co["memo"] = {k: st.session_state.get(v) for k, v in MEMO_KEYS.items()}
+    co["memo"]["comparables"] = st.session_state.get("memo_comps") or []
+    try:
+        company_store().save(current_user(), co)
+    except Exception as e:  # noqa: BLE001: el usuario debe ver por qué no se guardó
+        st.session_state["memo_msg_err"] = f"No se pudo guardar el borrador: {e}"
+        return
+    refresh_library()
+    st.session_state["memo_msg"] = f"Borrador guardado en «{co['name']}»."
+
+
+with T["Memo"]:
+    st.subheader("Memo de inversión")
+    st.caption("Pensado para el comité: la app rellena todas las cifras, tablas y gráficos con el análisis actual; tú añades "
+               "la recomendación, la tesis y el contexto. Se descarga en PDF para circularlo, en Word para editarlo y en Excel "
+               "para rehacer los números.")
+    if st.session_state.get("memo_msg"):
+        msg = st.session_state.pop("memo_msg")
+        st.success(msg)
+        st.toast(msg, icon="✅")
+    if st.session_state.get("memo_msg_err"):
+        st.error(st.session_state.pop("memo_msg_err"))
+
+    base_ctx = build_memo_context()
+    auto = memo_mod.auto_risks(base_ctx)
+    _default("memo_reco", "Seguir analizando")
+    _default("memo_risks", "\n".join(auto))
+    _default("memo_next", "\n".join(memo_mod.DEFAULT_NEXT_STEPS))
+    _active_co = next((c for c in my_companies() if c["id"] == st.session_state.get("active_company")), None)
+    _default("memo_desc", (_active_co or {}).get("notes", ""))
+
+    st.markdown(f"**Empresa:** {base_ctx.company}" + ("" if _active_co else "  \n:gray[Carga una empresa guardada en la barra "
+                                                       "lateral para que el memo lleve su nombre y puedas guardar el borrador.]"))
+    if not _active_co:
+        st.text_input("Nombre de la empresa en el memo", key="memo_company", placeholder="Startup analizada")
+    a1, a2, a3 = st.columns([2, 2, 2])
+    a1.text_input("Analista", key="memo_analyst")
+    a2.text_input("Fondo", key="memo_fund")
+    a3.selectbox("Recomendación", memo_mod.RECOMMENDATIONS, key="memo_reco")
+    st.text_area("Tesis de inversión", key="memo_thesis", height=110,
+                 placeholder="Por qué esta empresa, por qué ahora y por qué este equipo. Mercado, ventaja competitiva y tracción.")
+    st.text_area("Descripción de la empresa", key="memo_desc", height=90,
+                 help="Por defecto, las notas de la empresa guardada.")
+    st.text_area("Uso de los fondos", key="memo_use", height=70, placeholder="Contratación, producto, expansión, runway que da la ronda…")
+    r1, r2 = st.columns([4, 1])
+    r1.text_area("Riesgos y mitigantes (uno por línea)", key="memo_risks", height=170,
+                 help="Empieza con los riesgos que la app detecta en el análisis. Edítalos y añade los mitigantes.")
+    r2.button("↻ Riesgos detectados", on_click=memo_refresh_risks, args=(auto,), key="memo_risks_btn", width="stretch",
+              help="Sustituye la lista por los riesgos que la app detecta con los datos actuales.")
+    st.text_area("Próximos pasos (uno por línea)", key="memo_next", height=110)
+    lib_opts = {c["id"]: c["name"] for c in my_companies() if c["id"] != st.session_state.get("active_company")}
+    # Solo ids que existan como opción (p. ej. la propia empresa activa no puede ser su comparable)
+    st.session_state["memo_comps"] = [i for i in (st.session_state.get("memo_comps") or []) if i in lib_opts]
+    if lib_opts:
+        st.multiselect("Comparables de tu biblioteca para incluir", list(lib_opts), format_func=lib_opts.get, key="memo_comps")
+
+    b1, b2 = st.columns([1, 1])
+    gen = b1.button("📝 Generar memo", type="primary", key="memo_gen_btn", width="stretch")
+    b2.button("💾 Guardar borrador en la empresa", on_click=memo_save_draft, key="memo_save_btn", width="stretch",
+              disabled=_active_co is None, help="Guarda los textos del memo con la empresa activa para retomarlo otro día.")
+
+    if gen:
+        with st.spinner("Generando el memo, los gráficos y los documentos…"):
+            ctx_ = build_memo_context()
+            memo_obj = memo_mod.build_memo(ctx_)
+            stamp = dt.date.today().isoformat()
+            fname = "".join(ch_ if ch_.isalnum() else "_" for ch_ in ctx_.company).strip("_")[:40] or "startup"
+            st.session_state["memo_files"] = {
+                "pdf": memo_mod.to_pdf(memo_obj), "docx": memo_mod.to_docx(memo_obj), "xlsx": memo_mod.to_xlsx(ctx_, memo_obj),
+                "name": f"memo_{fname}_{stamp}", "obj": memo_obj,
+            }
+    files = st.session_state.get("memo_files")
+    if files:
+        st.success("Memo generado con los datos actuales. Si cambias algo en la app, vuelve a generarlo.", icon=":material/task_alt:")
+        d1, d2, d3 = st.columns(3)
+        d1.download_button("⬇️ PDF", files["pdf"], f"{files['name']}.pdf", "application/pdf", key="memo_dl_pdf", width="stretch")
+        d2.download_button("⬇️ Word", files["docx"], f"{files['name']}.docx",
+                           "application/vnd.openxmlformats-officedocument.wordprocessingml.document", key="memo_dl_docx", width="stretch")
+        d3.download_button("⬇️ Excel", files["xlsx"], f"{files['name']}.xlsx",
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="memo_dl_xlsx", width="stretch")
+        with st.expander("Vista previa del memo", expanded=True):
+            mo = files["obj"]
+            st.markdown(f"### {mo.title}")
+            st.caption(" · ".join(f"{k}: {v}" for k, v in mo.meta.items()))
+            for sec in mo.sections:
+                st.markdown(f"#### {sec.title}")
+                for blk in sec.blocks:
+                    if isinstance(blk, memo_mod.Sub):
+                        st.markdown(f"**{blk.text}**")
+                    elif isinstance(blk, str):
+                        st.markdown(blk)
+                    elif isinstance(blk, list):
+                        st.markdown("\n".join(f"- {it}" for it in blk))
+                    elif isinstance(blk, memo_mod.Table):
+                        st.dataframe(pd.DataFrame(blk.rows, columns=blk.columns), hide_index=True, width="stretch")
+                    elif isinstance(blk, memo_mod.Figure):
+                        st.image(blk.png, caption=blk.caption or None, width="stretch")
 
 # ======================================================================= pie
 
