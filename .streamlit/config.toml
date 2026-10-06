@@ -4,29 +4,57 @@ gatherUsageStats = false
 [server]
 headless = true
 
-# Tema: neutros gris (Tailwind gray), un solo acento azul (el mismo de los gráficos), Inter y
-# una escala de títulos contenida para que el veredicto y las cifras tengan más peso que los títulos.
+# Tema "libro mayor": la paleta sale del mundo del inversor (libros de cuentas, billetes, latón de
+# notaría). Verde tinta como marca y como serie principal de los gráficos, latón para la referencia
+# (la pre-money, el precio que se discute) y granate para pérdidas. Papel frío, ligeramente verdoso.
+# Títulos en serif (Source Serif 4, tono de memo de comité) y cuerpo en Public Sans.
+# Mismos valores que src/charts.py y src/memo_charts.py.
 [theme]
 base = "light"
-primaryColor = "#2a78d6"
-backgroundColor = "#fcfcfb"
-secondaryBackgroundColor = "#f3f4f6"
-textColor = "#111827"
-linkColor = "#1d5fb8"
-font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-headingFontWeights = [700, 650, 600, 600, 600, 600]
-headingFontSizes = ["2rem", "1.5rem", "1.2rem", "1.05rem", "1rem", "0.9rem"]
+primaryColor = "#1E5641"
+backgroundColor = "#F6F7F3"
+secondaryBackgroundColor = "#EBEFE8"
+textColor = "#18211D"
+linkColor = "#1E5641"
+font = "Public Sans:https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap"
+headingFont = "'Source Serif 4':https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap"
+headingFontWeights = [700, 600, 600, 600, 600, 600]
+headingFontSizes = ["2.1rem", "1.55rem", "1.25rem", "1.08rem", "1rem", "0.9rem"]
 metricValueFontSize = "1.75rem"
 metricValueFontWeight = 600
-baseRadius = "0.5rem"
-buttonRadius = "0.5rem"
-borderColor = "#e5e7eb"
-dataframeBorderColor = "#e5e7eb"
-dataframeHeaderBackgroundColor = "#f3f4f6"
+baseRadius = "0.375rem"
+buttonRadius = "0.375rem"
+borderColor = "#D9DFD6"
+dataframeBorderColor = "#D9DFD6"
+dataframeHeaderBackgroundColor = "#E6ECE4"
 showWidgetBorder = true
 showSidebarBorder = true
-chartCategoricalColors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+chartCategoricalColors = ["#1E5641", "#B7862A", "#9C3535", "#3D5A80", "#86A893", "#6D4C7D", "#8C7B5A", "#4B524E"]
+chartSequentialColors = ["#E1ECE5", "#C2DACB", "#A2C6B0", "#80AF94", "#5E9579", "#457F63", "#2F6B50", "#235A43", "#1A4A37", "#123A2B"]
+chartDivergingColors = ["#7A2A2A", "#9C3535", "#C77B6F", "#E7C3B9", "#EEF0EA", "#C2DACB", "#80AF94", "#2F6B50", "#163F2F"]
+# Colores con nombre (insignias, avisos, :color[texto]) dentro de la misma familia
+greenColor = "#2F6B50"
+greenBackgroundColor = "#E1ECE5"
+greenTextColor = "#1E5641"
+redColor = "#9C3535"
+redBackgroundColor = "#F4E4E0"
+redTextColor = "#7E2A2A"
+orangeColor = "#B7862A"
+orangeBackgroundColor = "#F5EBD6"
+orangeTextColor = "#7A5814"
+yellowColor = "#C49A2C"
+yellowBackgroundColor = "#F6EED9"
+yellowTextColor = "#6E5212"
+blueColor = "#3D5A80"
+blueBackgroundColor = "#E3E9F1"
+blueTextColor = "#2C4466"
+violetColor = "#6D4C7D"
+violetBackgroundColor = "#EDE6F0"
+violetTextColor = "#523A5E"
+grayColor = "#5E6661"
+grayBackgroundColor = "#E8ECE6"
+grayTextColor = "#3F4642"
 
 [theme.sidebar]
-backgroundColor = "#f6f7f9"
-secondaryBackgroundColor = "#ffffff"
+backgroundColor = "#EBEFE8"
+secondaryBackgroundColor = "#F6F7F3"

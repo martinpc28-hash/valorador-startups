@@ -1,7 +1,7 @@
 """Gráficos plotly y formato de números en español.
 
-Paleta: slots categóricos validados (azul, naranja, aqua), rampa secuencial azul y par
-divergente azul ↔ rojo. Un solo eje por gráfico; marcas finas; rejilla discreta.
+Paleta "libro mayor": verde tinta para la serie principal, latón para la referencia y granate
+para negativos; rampa secuencial verde. Un solo eje por gráfico; marcas finas; rejilla discreta.
 """
 
 from __future__ import annotations
@@ -12,18 +12,23 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-BLUE = "#2a78d6"
-ORANGE = "#eb6834"
-AQUA = "#1baf7a"
-RED = "#e34948"
-INK_MUTED = "#898781"
-INK_SECONDARY = "#52514e"
-GOOD = "#0ca30c"
-WARNING = "#fab219"
-CRITICAL = "#d03b3b"
-SEQ_BLUE = [[0.0, "#cde2fb"], [0.25, "#86b6ef"], [0.5, "#3987e5"], [0.75, "#1c5cab"], [1.0, "#0d366b"]]
-ORDINAL_BLUE = ["#86b6ef", "#2a78d6", "#104281"]  # pesimista, base, optimista
-FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
+# Paleta "libro mayor" (la misma de .streamlit/config.toml): verde tinta como serie principal,
+# latón para la referencia (pre-money, objetivo, tu fondo) y granate para negativos.
+PRIMARY = "#1E5641"
+PRIMARY_LIGHT = "#A2C6B0"
+REFERENCE = "#B7862A"
+SAGE = "#86A893"
+SLATE = "#3D5A80"
+NEGATIVE = "#9C3535"
+INK_MUTED = "#7D857F"
+INK_SECONDARY = "#4B524E"
+GOOD = "#2F6B50"
+WARNING = "#C49A2C"
+CRITICAL = "#9C3535"
+SEQ_GREEN = [[0.0, "#E1ECE5"], [0.25, "#A2C6B0"], [0.5, "#5E9579"], [0.75, "#2F6B50"], [1.0, "#123A2B"]]
+ORDINAL_GREEN = ["#A2C6B0", "#2F6B50", "#123A2B"]  # pesimista, base, optimista
+TITLE_FONT = '"Source Serif 4", Georgia, serif'  # como los títulos de la app
+FONT = '"Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif'
 
 # "USD" en vez de "US$": en Markdown de Streamlit el "$" abre una fórmula.
 CURRENCY_SYMBOL = {"USD": "USD", "EUR": "€"}
@@ -88,7 +93,7 @@ def money_scale(values) -> tuple[float, str]:
 def _layout(fig: go.Figure, title: str = "", height: int = 360, **kw) -> go.Figure:
     kw.setdefault("bargap", 0.35)
     fig.update_layout(
-        title=dict(text=title, x=0, xanchor="left", font=dict(size=15)) if title else None,
+        title=dict(text=title, x=0, xanchor="left", font=dict(size=16, family=TITLE_FONT)) if title else None,
         height=height,
         margin=dict(l=8, r=16, t=48 if title else 16, b=8),
         font=dict(family=FONT, size=12),
@@ -114,16 +119,16 @@ def football_field(rows: list[dict], pre_money: float, currency: str) -> go.Figu
         lo, hi = sorted((r["low"], r["high"]))
         fig.add_trace(go.Scatter(
             x=[lo / scale, hi / scale], y=[r["method"]] * 2, mode="lines",
-            line=dict(color="#86b6ef", width=14), showlegend=False,
+            line=dict(color=PRIMARY_LIGHT, width=14), showlegend=False,
             hovertemplate=f"{r['method']}<br>{r['range_label']}: %{{x:,.2f}} {unit} {sym}<extra></extra>",
         ))
     fig.add_trace(go.Scatter(
         x=[r["mid"] / scale for r in rows[::-1]], y=names, mode="markers",
-        marker=dict(color=BLUE, size=12, line=dict(color="white", width=2)),
+        marker=dict(color=PRIMARY, size=12, line=dict(color="white", width=2)),
         name="Valor central",
         hovertemplate="%{y}<br>Central: %{x:,.2f} " + f"{unit} {sym}<extra></extra>",
     ))
-    fig.add_vline(x=pre_money / scale, line=dict(color=ORANGE, width=2))
+    fig.add_vline(x=pre_money / scale, line=dict(color=REFERENCE, width=2))
     fig.add_annotation(
         x=pre_money / scale, y=1.02, yref="paper", text=f"Pre-money propuesta: {fmt_money(pre_money, currency)}",
         showarrow=False, font=dict(color=INK_SECONDARY), xanchor="left", yanchor="bottom",
@@ -138,9 +143,9 @@ def football_field(rows: list[dict], pre_money: float, currency: str) -> go.Figu
 # ---------------------------------------------------------------- DCF
 
 
-def bars(x, y, title: str, ytitle: str, color: str = BLUE, signed: bool = False, fmt: str = ",.2f") -> go.Figure:
+def bars(x, y, title: str, ytitle: str, color: str = PRIMARY, signed: bool = False, fmt: str = ",.2f") -> go.Figure:
     y = np.asarray(y, dtype=float)
-    colors = [BLUE if v >= 0 else RED for v in y] if signed else color
+    colors = [PRIMARY if v >= 0 else NEGATIVE for v in y] if signed else color
     fig = go.Figure(go.Bar(
         x=x, y=y, marker=dict(color=colors, cornerradius=4),
         hovertemplate="Año %{x}<br>%{y:" + fmt + "}<extra></extra>",
@@ -154,7 +159,7 @@ def bars(x, y, title: str, ytitle: str, color: str = BLUE, signed: bool = False,
 def line(x, y, title: str, ytitle: str, pct: bool = False, ref: float | None = None, ref_label: str = "") -> go.Figure:
     fig = go.Figure(go.Scatter(
         x=x, y=np.asarray(y) * (100 if pct else 1), mode="lines+markers",
-        line=dict(color=BLUE, width=2), marker=dict(size=8, line=dict(color="white", width=2)),
+        line=dict(color=PRIMARY, width=2), marker=dict(size=8, line=dict(color="white", width=2)),
         hovertemplate="Año %{x}<br>%{y:,.1f}" + (" %" if pct else "") + "<extra></extra>",
     ))
     if ref is not None:
@@ -170,7 +175,7 @@ def line(x, y, title: str, ytitle: str, pct: bool = False, ref: float | None = N
 def heatmap(z: np.ndarray, x_labels: list[str], y_labels: list[str], title: str, xtitle: str, ytitle: str, unit: str) -> go.Figure:
     text = [[fmt_num(v, 1) for v in row] for row in z]
     fig = go.Figure(go.Heatmap(
-        z=z, x=x_labels, y=y_labels, colorscale=SEQ_BLUE, text=text, texttemplate="%{text}",
+        z=z, x=x_labels, y=y_labels, colorscale=SEQ_GREEN, text=text, texttemplate="%{text}",
         xgap=2, ygap=2, colorbar=dict(title=unit, thickness=10),
         hovertemplate=f"{xtitle}: %{{x}}<br>{ytitle}: %{{y}}<br>Valor: %{{text}} {unit}<extra></extra>",
     ))
@@ -186,12 +191,12 @@ def tornado(df: pd.DataFrame, base: float, title: str, unit: str) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Bar(
         y=df["variable"], x=df["low"] - base, base=base, orientation="h", name="Variable baja",
-        marker=dict(color=RED, cornerradius=4), customdata=df["low"],
+        marker=dict(color=NEGATIVE, cornerradius=4), customdata=df["low"],
         hovertemplate="%{y} baja<br>Valor: %{customdata:,.2f} " + unit + "<extra></extra>",
     ))
     fig.add_trace(go.Bar(
         y=df["variable"], x=df["high"] - base, base=base, orientation="h", name="Variable alta",
-        marker=dict(color=BLUE, cornerradius=4), customdata=df["high"],
+        marker=dict(color=PRIMARY, cornerradius=4), customdata=df["high"],
         hovertemplate="%{y} alta<br>Valor: %{customdata:,.2f} " + unit + "<extra></extra>",
     ))
     fig.add_vline(x=base, line=dict(color=INK_SECONDARY, width=1))
@@ -209,7 +214,7 @@ def scenario_bars(df: pd.DataFrame, currency: str) -> go.Figure:
     """df: Escenario, Método, Valor."""
     scale, unit = money_scale(df["Valor"].values)
     fig = go.Figure()
-    for color, (name, grp) in zip(ORDINAL_BLUE, df.groupby("Escenario", sort=False)):
+    for color, (name, grp) in zip(ORDINAL_GREEN, df.groupby("Escenario", sort=False)):
         fig.add_trace(go.Bar(
             x=grp["Método"], y=grp["Valor"] / scale, name=name, marker=dict(color=color, cornerradius=4),
             hovertemplate=f"{name}<br>%{{x}}: %{{y:,.2f}} {unit} {CURRENCY_SYMBOL[currency]}<extra></extra>",
@@ -224,7 +229,7 @@ def histogram(values: np.ndarray, title: str, xtitle: str, markers: dict[str, fl
     v = values / scale
     lo, hi = np.percentile(v, [0.5, 99])
     fig = go.Figure(go.Histogram(
-        x=np.clip(v, lo, hi), nbinsx=60, marker=dict(color=BLUE, line=dict(color="white", width=1)),
+        x=np.clip(v, lo, hi), nbinsx=60, marker=dict(color=PRIMARY, line=dict(color="white", width=1)),
         hovertemplate=xtitle + ": %{x}<br>Simulaciones: %{y}<extra></extra>",
     ))
     for i, (name, x) in enumerate(markers.items()):
@@ -233,7 +238,7 @@ def histogram(values: np.ndarray, title: str, xtitle: str, markers: dict[str, fl
                            showarrow=False, xanchor="left", xshift=3, font=dict(color=INK_SECONDARY, size=11),
                            bgcolor="rgba(255,255,255,0.7)")
     if target and lo <= target[1] / scale <= hi:
-        fig.add_vline(x=target[1] / scale, line=dict(color=ORANGE, width=2))
+        fig.add_vline(x=target[1] / scale, line=dict(color=REFERENCE, width=2))
         fig.add_annotation(x=target[1] / scale, y=1.0, yref="paper", text=target[0], showarrow=False,
                            xanchor="right", yanchor="bottom", xshift=-3, font=dict(color=INK_SECONDARY, size=11))
     _layout(fig, title, height=340, showlegend=False, bargap=0.02)
@@ -246,7 +251,7 @@ def log_histogram(values, title: str, xtitle: str, markers: dict[str, float]) ->
     """Histograma de importes en escala log10 (rondas, ingresos, tamaños de fondo) con marcas de referencia."""
     v = np.log10(np.asarray(values, dtype=float)[np.asarray(values, dtype=float) > 0])
     fig = go.Figure(go.Histogram(
-        x=v, nbinsx=50, marker=dict(color=BLUE, line=dict(color="white", width=1)),
+        x=v, nbinsx=50, marker=dict(color=PRIMARY, line=dict(color="white", width=1)),
         hovertemplate="Empresas: %{y}<extra></extra>",
     ))
     lo, hi = math.floor(v.min()), math.ceil(v.max())
@@ -254,7 +259,7 @@ def log_histogram(values, title: str, xtitle: str, markers: dict[str, float]) ->
     labels = [fmt_money(10 ** t, "USD", 0).replace("USD ", "") for t in ticks]
     for i, (name, x) in enumerate(markers.items()):
         if x and x > 0:
-            fig.add_vline(x=math.log10(x), line=dict(color=ORANGE, width=2))
+            fig.add_vline(x=math.log10(x), line=dict(color=REFERENCE, width=2))
             fig.add_annotation(x=math.log10(x), y=0.97 - 0.09 * i, yref="paper", text=f"{name}: {fmt_num(x / 1e6, 2)} M",
                                showarrow=False, xanchor="left", xshift=4, font=dict(color=INK_SECONDARY, size=11),
                                bgcolor="rgba(255,255,255,0.7)")
@@ -267,11 +272,11 @@ def log_histogram(values, title: str, xtitle: str, markers: dict[str, float]) ->
 def cash_chart(df: pd.DataFrame, currency: str) -> go.Figure:
     scale, unit = money_scale(df["Caja"].values)
     fig = go.Figure(go.Scatter(
-        x=df["Mes"], y=df["Caja"] / scale, mode="lines", line=dict(color=BLUE, width=2),
+        x=df["Mes"], y=df["Caja"] / scale, mode="lines", line=dict(color=PRIMARY, width=2),
         fill="tozeroy", fillcolor="rgba(42,120,214,0.12)",
         hovertemplate="Mes %{x}<br>Caja: %{y:,.2f} " + f"{unit} {CURRENCY_SYMBOL[currency]}<extra></extra>",
     ))
-    fig.add_hline(y=0, line=dict(color=RED, width=1))
+    fig.add_hline(y=0, line=dict(color=NEGATIVE, width=1))
     _layout(fig, "Caja proyectada (mensual)", height=320, showlegend=False)
     fig.update_xaxes(title="Mes")
     fig.update_yaxes(title=f"{unit} {CURRENCY_SYMBOL[currency]}")
@@ -281,7 +286,7 @@ def cash_chart(df: pd.DataFrame, currency: str) -> go.Figure:
 def jcurve_chart(df: pd.DataFrame, currency: str) -> go.Figure:
     scale, unit = money_scale(df[["Flujo neto acumulado", "Valor total (con NAV)"]].values.ravel())
     fig = go.Figure()
-    for col, color in (("Flujo neto acumulado", BLUE), ("Valor total (con NAV)", ORANGE)):
+    for col, color in (("Flujo neto acumulado", PRIMARY), ("Valor total (con NAV)", REFERENCE)):
         fig.add_trace(go.Scatter(
             x=df["date"], y=df[col] / scale, mode="lines+markers", name=col,
             line=dict(color=color, width=2), marker=dict(size=8, line=dict(color="white", width=2)),

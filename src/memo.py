@@ -299,7 +299,7 @@ def build_memo(c: MemoContext) -> Memo:
                           widths=[0.28, 0.18, 0.18, 0.18, 0.18]))
     if c.ff_rows and _ok(c.pre_money):
         s.blocks.append(Figure(mc.football_field(c.ff_rows, c.pre_money, sym),
-                               "Rango de valor de cada método; el punto es el valor central y la línea naranja, la pre-money propuesta."))
+                               "Rango de valor de cada método; el punto es el valor central y la línea dorada, la pre-money propuesta."))
     s.read(ma.read_valuation(c))
     s.blocks.append(Sub("Descuento de flujos (DCF)"))
     s.blocks.append(f"DCF. Equity de {m(c.dcf_equity)}: valor operativo de {m(c.dcf_operating)} (flujos de 10 años {m(c.dcf_pv_fcff)} "
@@ -348,7 +348,7 @@ def build_memo(c: MemoContext) -> Memo:
     ]))
     if c.mc_moic is not None and c.mc_survived is not None and len(c.mc_moic):
         s.blocks.append(Figure(mc.moic_distribution(c.mc_moic, c.mc_survived, c.mc_target),
-                               "Solo escenarios con salida; la línea naranja es el MOIC objetivo y la última barra agrupa "
+                               "Solo escenarios con salida; la línea dorada es el MOIC objetivo y la última barra agrupa "
                                "los valores extremos (por encima del percentil 99)."))
     s.read(ma.read_montecarlo(c))
     if c.scenarios is not None and not c.scenarios.empty:
@@ -359,7 +359,7 @@ def build_memo(c: MemoContext) -> Memo:
             series = {lab: raw[col].astype(float).tolist() for col, lab in (
                 ("DCF", "DCF"), ("Método VC (pre-money)", "Método VC"), ("Múltiplos (EV/Sales)", "Múltiplos")) if col in raw}
             s.blocks.append(Figure(mc.scenarios(raw["Escenario"].tolist(), series, c.pre_money, sym),
-                                   "Valor del equity por escenario y método; la línea naranja es la pre-money propuesta."))
+                                   "Valor del equity por escenario y método; la línea dorada es la pre-money propuesta."))
         s.read(ma.read_scenarios(c))
     s.blocks.append(Sub("Caja y financiación"))
     s.blocks.append(_kv([
@@ -445,7 +445,7 @@ def to_pdf(memo: Memo) -> bytes:
     from fpdf import FPDF
     from fpdf.fonts import FontFace
 
-    accent, ink2, line, fill = (42, 120, 214), (82, 81, 78), (229, 231, 235), (243, 244, 246)
+    accent, ink2, line, fill = (30, 86, 65), (75, 82, 78), (217, 223, 214), (230, 236, 228)  # paleta libro mayor
 
     class PDF(FPDF):
         def header(self):
@@ -477,7 +477,7 @@ def to_pdf(memo: Memo) -> bytes:
     pdf.rect(0, 0, pdf.w, 3, "F")
     pdf.ln(4)
     pdf.set_font("DejaVu", "B", 19)
-    pdf.set_text_color(17, 24, 39)
+    pdf.set_text_color(24, 33, 29)
     pdf.multi_cell(w, 9, memo.title, new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("DejaVu", "", 10)
     pdf.set_text_color(*ink2)
@@ -487,19 +487,19 @@ def to_pdf(memo: Memo) -> bytes:
     for k, v in memo.meta.items():
         pdf.set_text_color(*ink2)
         pdf.cell(32, 5.5, k)
-        pdf.set_text_color(17, 24, 39)
+        pdf.set_text_color(24, 33, 29)
         pdf.cell(0, 5.5, str(v), new_x="LMARGIN", new_y="NEXT")
     pdf.ln(3)
 
     def table(t: Table):
         widths = t.widths or [1 / len(t.columns)] * len(t.columns)
         pdf.set_font("DejaVu", "", 8)
-        pdf.set_text_color(17, 24, 39)
+        pdf.set_text_color(24, 33, 29)
         pdf.set_draw_color(*line)
         pdf.set_fill_color(255, 255, 255)
         with pdf.table(col_widths=[x * 100 for x in widths], width=w, line_height=4.6, padding=1.4,
-                       headings_style=FontFace(emphasis="BOLD", color=(17, 24, 39), fill_color=fill),
-                       cell_fill_color=(249, 250, 251), cell_fill_mode="EVEN_ROWS",
+                       headings_style=FontFace(emphasis="BOLD", color=(24, 33, 29), fill_color=fill),
+                       cell_fill_color=(246, 247, 243), cell_fill_mode="EVEN_ROWS",
                        borders_layout="HORIZONTAL_LINES", text_align="LEFT") as tb:
             row = tb.row()
             for col in t.columns:
@@ -523,17 +523,17 @@ def to_pdf(memo: Memo) -> bytes:
         for b in sec.blocks:
             if isinstance(b, Sub):
                 pdf.set_font("DejaVu", "B", 9.8)
-                pdf.set_text_color(17, 24, 39)
+                pdf.set_text_color(24, 33, 29)
                 pdf.multi_cell(w, 5.5, b.text, new_x="LMARGIN", new_y="NEXT")
                 pdf.ln(0.5)
             elif isinstance(b, str):
                 pdf.set_font("DejaVu", "", 9)
-                pdf.set_text_color(17, 24, 39)
+                pdf.set_text_color(24, 33, 29)
                 pdf.multi_cell(w, 5, b, new_x="LMARGIN", new_y="NEXT")
                 pdf.ln(1.5)
             elif isinstance(b, list):
                 pdf.set_font("DejaVu", "", 9)
-                pdf.set_text_color(17, 24, 39)
+                pdf.set_text_color(24, 33, 29)
                 for item in b:
                     pdf.cell(4, 5, "•")
                     pdf.multi_cell(w - 4, 5, item, new_x="LMARGIN", new_y="NEXT")
@@ -543,12 +543,12 @@ def to_pdf(memo: Memo) -> bytes:
             elif isinstance(b, Insight):
                 if pdf.get_y() > pdf.h - 40:
                     pdf.add_page()
-                pdf.set_fill_color(239, 245, 253)
+                pdf.set_fill_color(232, 240, 235)
                 pdf.set_font("DejaVu", "B", 8.8)
                 pdf.set_text_color(*accent)
                 pdf.multi_cell(w, 5.4, f"  {b.title}", fill=True, new_x="LMARGIN", new_y="NEXT")
                 pdf.set_font("DejaVu", "", 8.8)
-                pdf.set_text_color(17, 24, 39)
+                pdf.set_text_color(24, 33, 29)
                 for item in b.lines:  # viñeta con sangría francesa sobre el mismo fondo
                     h = pdf.multi_cell(w - 9, 4.8, item, dry_run=True, output="HEIGHT")
                     if pdf.get_y() + h > pdf.h - pdf.b_margin:
@@ -587,12 +587,12 @@ def to_docx(memo: Memo) -> bytes:
     base = doc.styles["Normal"]
     base.font.name = "Calibri"
     base.font.size = Pt(10)
-    accent = RGBColor(0x2A, 0x78, 0xD6)
+    accent = RGBColor(0x1E, 0x56, 0x41)
 
     t = doc.add_heading(memo.title, level=0)
-    t.runs[0].font.color.rgb = RGBColor(0x11, 0x18, 0x27)
+    t.runs[0].font.color.rgb = RGBColor(0x18, 0x21, 0x1D)
     sub = doc.add_paragraph(memo.subtitle)
-    sub.runs[0].font.color.rgb = RGBColor(0x52, 0x51, 0x4E)
+    sub.runs[0].font.color.rgb = RGBColor(0x4B, 0x52, 0x4E)
     for k, v in memo.meta.items():
         para = doc.add_paragraph()
         para.paragraph_format.space_after = Pt(0)
@@ -643,7 +643,7 @@ def to_docx(memo: Memo) -> bytes:
                     cap = doc.add_paragraph(b.caption)
                     cap.alignment = WD_ALIGN_PARAGRAPH.LEFT
                     cap.runs[0].font.size = Pt(8)
-                    cap.runs[0].font.color.rgb = RGBColor(0x52, 0x51, 0x4E)
+                    cap.runs[0].font.color.rgb = RGBColor(0x4B, 0x52, 0x4E)
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()

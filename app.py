@@ -1537,10 +1537,10 @@ with T["Ratios España"]:
             fig.add_trace(go.Scatter(x=tr["year"], y=tr["p75"] * k, mode="lines", line=dict(width=0), showlegend=False,
                                      hoverinfo="skip"))
             fig.add_trace(go.Scatter(x=tr["year"], y=tr["p25"] * k, mode="lines", line=dict(width=0), fill="tonexty",
-                                     fillcolor="rgba(42,120,214,0.15)", name="P25 a P75",
+                                     fillcolor="rgba(30,86,65,0.14)", name="P25 a P75",
                                      hovertemplate="%{x}: P25 %{y:,.1f}<extra></extra>"))
             fig.add_trace(go.Scatter(x=tr["year"], y=tr["p50"] * k, mode="lines+markers", name="Mediana",
-                                     line=dict(color=ch.BLUE, width=2), marker=dict(size=8, line=dict(color="white", width=2)),
+                                     line=dict(color=ch.PRIMARY, width=2), marker=dict(size=8, line=dict(color="white", width=2)),
                                      hovertemplate="%{x}: mediana %{y:,.1f}<extra></extra>"))
             ch._layout(fig, f"{BDE_LABELS[pick]} · {sec_names[sector]} · {sizes[size_id]}", height=340,
                        legend=dict(orientation="h", y=1.12, x=0))
