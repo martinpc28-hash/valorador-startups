@@ -2239,7 +2239,7 @@ st.caption(
     "Los resultados dependen de supuestos que el usuario debe revisar."
 )
 st.markdown(
-    "Hecho por **Martín Pinzón** · [X (Twitter) @martinpinzon28](https://x.com/martinpinzon28) · "
+    "Hecho por **Martín Pinzón** · "
     "[LinkedIn](https://www.linkedin.com/in/mart%C3%ADn-alonso-pinz%C3%B3n-cede%C3%B1o-59128215a) · "
     "[GitHub](https://github.com/martinpc28-hash)"
 )

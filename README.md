@@ -193,4 +193,4 @@ Código bajo licencia MIT. Los datos de terceros conservan sus condiciones de us
 
 ## Autor
 
-Hecho por **Martín Pinzón** · [X (Twitter) @martinpinzon28](https://x.com/martinpinzon28) · [LinkedIn](https://www.linkedin.com/in/mart%C3%ADn-alonso-pinz%C3%B3n-cede%C3%B1o-59128215a) · [GitHub](https://github.com/martinpc28-hash)
+Hecho por **Martín Pinzón** · [LinkedIn](https://www.linkedin.com/in/mart%C3%ADn-alonso-pinz%C3%B3n-cede%C3%B1o-59128215a) · [GitHub](https://github.com/martinpc28-hash)
